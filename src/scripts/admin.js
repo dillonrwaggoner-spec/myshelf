@@ -166,22 +166,26 @@ $$('.type-btn').forEach((b) =>
     state.type = b.dataset.type;
     $$('.type-btn').forEach((x) => x.classList.toggle('active', x === b));
     $('#search-q').placeholder = `Search ${TYPES[state.type].plural.toLowerCase()}…`;
+    syncLinkForm();
     $('#results').innerHTML = '';
     $('#search-msg').textContent = '';
     $('#search-q').focus();
   }),
 );
 
-$('#search-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const q = $('#search-q').value.trim();
-  if (q.length < 2) return;
+// "Paste a BGG link" — only for board games.
+function syncLinkForm() {
+  $('#link-form').hidden = state.type !== 'boardgame';
+}
+syncLinkForm();
+
+async function runSearch(q) {
   $('#search-msg').textContent = 'Searching…';
   $('#results').innerHTML = '';
   try {
     const { results } = await api(`search?type=${state.type}&q=${encodeURIComponent(q)}`);
     state.results = results;
-    $('#search-msg').textContent = results.length ? `${results.length} results — pick one to add it.` : 'No matches. Try different words, or add it manually.';
+    $('#search-msg').textContent = results.length ? `${results.length} result${results.length === 1 ? '' : 's'} — pick one to add it.` : 'No matches. Try different words, or add it manually.';
     $('#results').innerHTML = results
       .map((r, i) => `
         <button type="button" class="result" data-i="${i}">
@@ -198,6 +202,22 @@ $('#search-form').addEventListener('submit', async (e) => {
     $('#search-msg').textContent = '';
     toast(err.message, 'error');
   }
+}
+
+$('#search-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = $('#search-q').value.trim();
+  if (q.length >= 2) runSearch(q);
+});
+
+$('#link-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const url = $('#link-url').value.trim();
+  if (!/boardgamegeek\.com\/(boardgame|boardgameexpansion|thing)\/\d+/i.test(url)) {
+    toast('That doesn\'t look like a BoardGameGeek game link (boardgamegeek.com/boardgame/…).', 'error');
+    return;
+  }
+  runSearch(url);
 });
 
 $('#results').addEventListener('click', async (e) => {
@@ -277,12 +297,12 @@ function updateCreatorLabel() {
   for (const opt of form.status.options) opt.textContent = words[opt.value] || opt.textContent;
 }
 
-// ───────── remember the last status, dates and collections used per type (new entries only) ─────────
+// ───────── remember the last status, dates, collections and "I own a copy" used per type (new entries only) ─────────
 const LAST_KEY = 'myshelf_last_settings';
 const readLast = () => { try { return JSON.parse(localStorage.getItem(LAST_KEY)) || {}; } catch { return {}; } };
 function rememberSettings(item) {
   const all = readLast();
-  all[item.type] = { status: item.status || '', dateStarted: item.dateStarted || '', dateFinished: item.dateFinished || '', collections: item.collections || [] };
+  all[item.type] = { status: item.status || '', dateStarted: item.dateStarted || '', dateFinished: item.dateFinished || '', collections: item.collections || [], owned: item.owned === true };
   try { localStorage.setItem(LAST_KEY, JSON.stringify(all)); } catch {}
 }
 function forgetSettings(type) {
@@ -301,6 +321,7 @@ function withLastSettings(item) {
       dateStarted: item.dateStarted || last.dateStarted,
       dateFinished: item.dateFinished || last.dateFinished,
       collections: item.collections?.length ? item.collections : last.collections,
+      owned: item.owned === true || last.owned === true,
     },
   };
 }
@@ -310,6 +331,7 @@ $('#editor-forget').addEventListener('click', () => {
   form.dateStarted.value = '';
   form.dateFinished.value = '';
   renderCollectionChecks([]);
+  form.owned.checked = false;
   $('#editor-remembered').hidden = true;
 });
 

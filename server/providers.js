@@ -322,10 +322,45 @@ export function parseBggSearch(xml) {
     const year = inner.match(/<yearpublished\b[^>]*\/?>/);
     return {
       id: attrs(a).id,
+      kind: attrs(a).type || 'boardgame',
       name: name ? attrs(name[0]).value : '',
       year: year ? attrs(year[0]).value : '',
     };
   });
+}
+
+/** A BoardGameGeek link (or "bgg:123" / bare id) → the game's id, else null. */
+export function bggIdFromUrl(input) {
+  const s = String(input || '').trim();
+  const m = s.match(/boardgamegeek\.com\/(?:boardgame|boardgameexpansion|boardgameaccessory|thing)\/(\d+)/i)
+    || s.match(/^(?:bgg:)?(\d{1,7})$/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Rank BGG search hits. BGG lists expansions under type=boardgame too (often twice, once
+ * tagged boardgameexpansion), and returns them in its own order, so a popular base game with
+ * lots of add-ons ("Dungeon Degenerates: Hand of Doom") could fall past the cut. Base games first,
+ * then how well the name matches. Exported for tests.
+ */
+export function rankBggHits(hits, q) {
+  const query = norm(q);
+  const expansions = new Set(hits.filter((h) => h.kind === 'boardgameexpansion').map((h) => h.id));
+  const titleScore = (name) => {
+    const n = norm(name);
+    const parts = [n, ...String(name || '').split(/[:\-–—]/).slice(1).map(norm)].filter(Boolean);
+    if (parts.some((p) => p === query)) return 0;
+    if (parts.some((p) => p.startsWith(query))) return 1;
+    if (n.includes(query)) return 2;
+    return 3;
+  };
+  const best = new Map(); // id → best-scoring hit (primary or alternate name)
+  hits.forEach((h, i) => {
+    const s = { ...h, i, exp: expansions.has(h.id) ? 1 : 0, t: titleScore(h.name) };
+    const prev = best.get(h.id);
+    if (!prev || s.t < prev.t) best.set(h.id, prev ? { ...s, i: prev.i } : s);
+  });
+  return [...best.values()].sort((a, b) => a.exp - b.exp || a.t - b.t || a.i - b.i);
 }
 
 export function parseBggThings(xml) {
@@ -423,21 +458,13 @@ async function bgg(env, path) {
   throw new HttpError(504, 'BoardGameGeek is busy — try again in a moment.');
 }
 
-async function searchBgg(q, env) {
-  const hits = parseBggSearch(await bgg(env, `search?query=${encodeURIComponent(q)}&type=boardgame`));
-  const ql = q.trim().toLowerCase();
-  const score = (h) => (h.name.toLowerCase() === ql ? 0 : h.name.toLowerCase().startsWith(ql) ? 1 : 2);
-  const seen = new Set();
-  const top = hits
-    .map((h, i) => ({ ...h, i }))
-    .sort((a, b) => score(a) - score(b) || a.i - b.i)
-    .filter((h) => !seen.has(h.id) && seen.add(h.id))
-    .slice(0, 12);
-  if (!top.length) return [];
-  const things = parseBggThings(await bgg(env, `thing?id=${top.map((h) => h.id).join(',')}&stats=1`));
-  const byId = Object.fromEntries(things.map((t) => [t.id, t]));
-  return top.map((h) => {
+/** BGG things → search results, in the order given. */
+async function bggResults(env, hits) {
+  if (!hits.length) return [];
+  const byId = Object.fromEntries((await bggThings(env, hits.map((h) => h.id))).map((t) => [t.id, t]));
+  return hits.filter((h) => byId[h.id] || h.name).map((h) => {
     const t = byId[h.id] || {};
+    const isExp = t.kind === 'boardgameexpansion';
     return result({
       type: 'boardgame',
       source: 'bgg',
@@ -448,10 +475,22 @@ async function searchBgg(q, env) {
       cover: t.image || t.thumbnail || '',
       description: truncate(t.description),
       genres: t.categories || [],
-      details: { ...bggDetails(t), ...(t.kind === 'boardgameexpansion' ? { kind: 'Expansion' } : {}) },
-      url: `https://boardgamegeek.com/boardgame/${h.id}`,
+      details: { ...bggDetails(t), ...(isExp ? { kind: 'Expansion' } : {}) },
+      url: `https://boardgamegeek.com/${isExp ? 'boardgameexpansion' : 'boardgame'}/${h.id}`,
     });
   });
+}
+
+async function searchBgg(q, env) {
+  // A pasted BGG link goes straight to that game.
+  const id = bggIdFromUrl(q);
+  if (id && /boardgamegeek|^bgg:/i.test(q)) {
+    const res = await bggResults(env, [{ id }]);
+    if (!res.length) throw new HttpError(404, 'No game found at that BoardGameGeek link.');
+    return res;
+  }
+  const hits = parseBggSearch(await bgg(env, `search?query=${encodeURIComponent(q)}&type=boardgame`));
+  return bggResults(env, rankBggHits(hits, q).slice(0, 15));
 }
 
 // ───────────────────────── Public API ─────────────────────────

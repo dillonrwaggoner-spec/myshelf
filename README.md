@@ -4,7 +4,9 @@ A self-hosted media journal and virtual bookshelf for books, movies, TV, music, 
 
 **Cost: $0.** Everything runs on Cloudflare's free plan (one Worker, a D1 database and KV storage, no credit card needed). Your copy of the code lives in a free GitHub account. Everyone runs their own copy, so your shelf and your data stay in your own accounts.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/lexjudex/myshelf)
+If MyShelf is useful to you, you can support its development on Ko-fi:
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K0A32B3009)
 
 ## How it works
 
@@ -25,16 +27,7 @@ Friends' MyShelf sites ◄──► /federation/v1/* (signed messages; see "Frie
 
 You need a free [GitHub](https://github.com/signup) account and a free [Cloudflare](https://dash.cloudflare.com/sign-up) account. There are two ways to set up. Both end in the same place.
 
-### Option A: one-click (quickest)
-
-1. Click **Deploy to Cloudflare** above and sign in to Cloudflare and GitHub when asked.
-2. Cloudflare copies MyShelf into a new repository on your GitHub account and creates your database and cover storage.
-3. It asks for your secrets. Only **`ADMIN_TOKEN`** is required: make up a long random password and keep it somewhere safe. Leave the API keys blank for now if you don't have them yet.
-4. Click **Deploy**. In a minute or two your site is live at `https://myshelf.<your-subdomain>.workers.dev`.
-
-Option A's copy isn't linked to this repository, so getting updates later takes a couple of git commands (see [Getting updates](#getting-updates)).
-
-### Option B: fork (easiest to keep up to date)
+### Option A: fork (recommended, easiest to keep up to date)
 
 1. On GitHub, click **Fork** on this repository.
 2. In the Cloudflare dashboard: **Workers & Pages → Create → Import a repository**, then pick your fork. Leave the build command as `npm run build` and the deploy command as `npx wrangler deploy`.
@@ -42,6 +35,16 @@ Option A's copy isn't linked to this repository, so getting updates later takes 
 4. Open your Worker → **Settings → Variables and Secrets** → add `ADMIN_TOKEN` as a **Secret**.
 
 With a fork, GitHub's **Sync fork** button pulls in new versions, and Cloudflare redeploys automatically.
+
+### Option B: one-click (quickest)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/lexjudex/myshelf)
+1. Click **Deploy to Cloudflare** above and sign in to Cloudflare and GitHub when asked.
+2. Cloudflare copies MyShelf into a new repository on your GitHub account and creates your database and cover storage.
+3. It asks for your secrets. Only **`ADMIN_TOKEN`** is required: make up a long random password and keep it somewhere safe. Leave the API keys blank for now if you don't have them yet.
+4. Click **Deploy**. In a minute or two your site is live at `https://myshelf.<your-subdomain>.workers.dev`.
+
+Option B's copy isn't linked to this repository, so getting updates later takes a couple of git commands (see [Getting updates](#getting-updates)).
+
 
 ### Then, for both options
 
@@ -62,6 +65,7 @@ Add each one in your Worker → **Settings → Variables and Secrets** → **Add
 | Open Library | No key needed. | |
 | Google Books | Optional. Works without a key at low volume. | `GOOGLE_BOOKS_KEY` |
 | Contact email | Optional. Sent to Open Library and MusicBrainz, as they request. | `CONTACT_EMAIL` |
+| GitHub (updates, optional) | Forks only. github.com/settings/personal-access-tokens → **Generate new token** → *Only select repositories*: your fork → **Repository permissions → Contents: Read and write**. Lets **Manage → Settings → Updates** pull in new versions for you. | `GITHUB_TOKEN` |
 
 Without Spotify, or if it ever fails, music search uses **MusicBrainz + Cover Art Archive** automatically.
 
@@ -86,8 +90,9 @@ Friends are other people running their own MyShelf. There's no central server: y
    - see each other's *Friends only* items (**View shelf**), with "You have this" next to anything you both own,
    - **Recommend** something from your Library; it lands in their inbox with an **Add it** button,
    - **Ask to borrow** anything they've marked *I own a copy*. Saying yes marks it as lent on their shelf.
+   - tap the **heart** on any of their items to say you enjoyed it too. They get a note in their inbox; tap again to take it back. (Your friend needs a copy of MyShelf with hearts, so ask them to update if it says otherwise.)
 
-**Friends page:** `/friends/` on your site (in the menu) shows your friends' latest public entries and links to their shelves. Only public items appear there, and your inbox and requests stay private in Manage.
+**Friends page:** `/friends/` on your site (in the menu) shows your friends' latest public entries and links to their shelves. Only public items appear there, and your inbox and requests stay private in Manage. When you're signed in to Manage on that browser, each entry also gets a heart button; visitors never see it.
 
 **What friends can see:** your public items, your *Friends only* items, whether you own them, and whether they're available to borrow. They never see *Only me* items or who you've lent things to. Removing a friend tells their site to remove you too.
 
@@ -97,8 +102,8 @@ Friends are other people running their own MyShelf. There's no central server: y
 
 ## Getting updates
 
-- **Forked (Option B):** on GitHub, open your fork and click **Sync fork → Update branch**. Cloudflare redeploys automatically.
-- **One-click (Option A):** run this once on your computer:
+- **Forked (Option A):** in **Manage → Settings → Updates**, click **Update now** (needs the optional `GITHUB_TOKEN` secret, and **Source code link** set to your fork). Or on GitHub, open your fork and click **Sync fork → Update branch**. Either way, Cloudflare redeploys automatically.
+- **One-click (Option B):** run this once on your computer:
   ```bash
   git clone https://github.com/YOUR-USERNAME/YOUR-REPO.git && cd YOUR-REPO
   git remote add upstream https://github.com/lexjudex/myshelf.git
@@ -106,18 +111,6 @@ Friends are other people running their own MyShelf. There's no central server: y
   Then whenever you want the latest version: `git pull upstream main && git push`.
 
 Database changes in new versions apply themselves on the next page load.
-
-## Moving from the older Cloudflare Pages version
-
-Older copies of MyShelf ran on Cloudflare Pages. To move to a Worker:
-
-1. Update your repository to this version. Your Pages site rebuilds and keeps working.
-2. On the old site: **Manage → Settings → Download backup**.
-3. Create the new Worker (Option B above, pointing at your existing repository) and add your secrets to it.
-4. On the new site: **Manage → Settings → Restore from backup**. Leave the old site up until this finishes: the covers are copied over from it.
-5. Check the new site, then delete the old Pages project (and its D1 database and KV namespace, if you want).
-
-The very oldest version kept entries as Markdown files in `src/content/items/`. If you still have those, the admin page offers to **Import** them.
 
 ## Optional: make the site private
 

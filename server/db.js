@@ -79,6 +79,27 @@ const MIGRATIONS = [
       `CREATE INDEX IF NOT EXISTS outbox_created ON outbox (created_at)`,
     ],
   },
+  {
+    version: 4, // hearts: "I enjoyed this too" on a friend's item
+    sql: [
+      // Hearts you've given to friends' items (so the heart stays filled in when you look again).
+      `CREATE TABLE IF NOT EXISTS hearts_sent (
+        friend_url TEXT NOT NULL,
+        uid TEXT NOT NULL,                 -- the item's uid on their site
+        title TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (friend_url, uid)
+      )`,
+      // Hearts friends have given to your items.
+      `CREATE TABLE IF NOT EXISTS hearts_received (
+        from_url TEXT NOT NULL,
+        uid TEXT NOT NULL,                 -- your item's uid
+        inbox_id TEXT,                     -- the inbox message it made, removed again if they take the heart back
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (from_url, uid)
+      )`,
+    ],
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

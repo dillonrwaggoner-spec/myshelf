@@ -20,7 +20,8 @@ export const SHELF_PATH = '/federation/v1/shelf';
 export const MAX_BODY = 32 * 1024;
 const MAX_SKEW_MS = 5 * 60 * 1000;
 
-export const KINDS = ['friend-request', 'friend-accept', 'friend-remove', 'recommend', 'borrow-request', 'borrow-reply'];
+// heart: { item: { uid }, on: true|false } — "I enjoyed this too" on one of the receiver's items (on: false takes it back).
+export const KINDS = ['friend-request', 'friend-accept', 'friend-remove', 'recommend', 'borrow-request', 'borrow-reply', 'heart'];
 
 export async function signingString({ method, path, to, from, date, body }) {
   return ['myshelf-1', method.toUpperCase(), path, to, from, date, await sha256hex(body || '')].join('\n');

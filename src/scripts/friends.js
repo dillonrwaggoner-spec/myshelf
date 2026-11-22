@@ -35,6 +35,9 @@ const thumb = (cover, title, type) => {
   return cover ? `<img class="thumb" src="${esc(cover)}" alt="" style="height:52px" loading="lazy" referrerpolicy="no-referrer">` : ph;
 };
 
+const HEART = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-9.3-9.2C1.4 8 3.4 4.5 7 4.5c2 0 3.3 1.1 5 3 1.7-1.9 3-3 5-3 3.6 0 5.6 3.5 4.3 6.8-1.8 4.6-9.3 9.2-9.3 9.2z"/></svg>';
+const heartBtn = (on, attrs) => `<button type="button" class="heart-btn${on ? ' on' : ''}" aria-pressed="${on}" title="${on ? 'You enjoyed this too (click to undo)' : 'I enjoyed this too'}" ${attrs}>${HEART}</button>`;
+
 // ───────── friends tab ─────────
 const state = { me: null, friends: [], inbox: [], loaded: false };
 
@@ -61,10 +64,15 @@ function render() {
   renderFriends();
 }
 
+// Messages "Clear inbox" keeps: requests still waiting on your answer (mirrors clearInbox on the server).
+const waiting = (m) => ['unread', 'read'].includes(m.status) && (m.kind === 'borrow-request'
+  || (m.kind === 'friend-request' && state.friends.find((f) => f.id === m.friendId)?.status === 'pending'));
+
 function renderInbox() {
   const list = $('#inbox-list');
+  $('#inbox-clear').hidden = !state.inbox.some((m) => !waiting(m));
   if (!state.inbox.length) {
-    list.innerHTML = '<li class="muted">Nothing yet. Friend requests, recommendations and borrow requests show up here.</li>';
+    list.innerHTML = '<li class="muted">Nothing yet. Friend requests, recommendations, borrow requests and hearts show up here.</li>';
     return;
   }
   list.innerHTML = state.inbox.map((m) => {
@@ -98,6 +106,11 @@ function renderInbox() {
       if (open) actions = `
         <button class="btn primary small" data-borrow="yes" data-id="${esc(m.id)}">Yes, lend it</button>
         <button class="btn ghost small" data-borrow="no" data-id="${esc(m.id)}">Not now</button>`;
+    } else if (m.kind === 'heart') {
+      const it = p.item || {};
+      const title = it.visibility === 'public' && it.slug ? `<a href="/item/${esc(it.slug)}/" target="_blank">${esc(it.title)}</a>` : esc(it.title);
+      body = `<span class="inbox-item">${thumb(it.cover, it.title, it.type)}<span><span class="heart-mark" aria-hidden="true">${HEART}</span> ${who} enjoyed
+        <strong>${title}</strong> too.</span></span>`;
     } else if (m.kind === 'borrow-reply') {
       body = `${who} ${p.answer === 'yes' ? 'said <strong>yes</strong> to' : 'can’t lend you'} <strong>${esc(p.title)}</strong>${p.answer === 'yes' ? '.' : ' right now.'}`;
     }
@@ -149,6 +162,30 @@ document.addEventListener('myshelf:tab', async (e) => {
 
 $('#copy-address').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(state.me?.url || ''); toast('Address copied.'); } catch { toast('Couldn’t copy. Select the address and copy it instead.', 'error'); }
+});
+
+$('#inbox-clear').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  if (!btn.classList.contains('confirm')) {
+    btn.classList.add('confirm', 'danger');
+    btn.textContent = 'Clear everything?';
+    setTimeout(() => { btn.classList.remove('confirm', 'danger'); btn.textContent = 'Clear inbox'; }, 4000);
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await api('friends', { method: 'POST', body: { action: 'clear-inbox' } });
+    const left = state.inbox.filter(waiting).length;
+    toast(left ? `Inbox cleared. ${left === 1 ? 'One request is' : `${left} requests are`} still waiting on your answer.` : 'Inbox cleared.');
+    await loadFriends();
+    setUnread(state.inbox.filter((m) => m.status === 'unread').length);
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('confirm', 'danger');
+    btn.textContent = 'Clear inbox';
+  }
 });
 
 $('#friend-add').addEventListener('submit', async (e) => {
@@ -239,9 +276,29 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  const h = e.target.closest('[data-heart]');
+  if (h) return toggleHeart(h, { friendId: h.dataset.friend, uid: h.dataset.heart, title: h.dataset.title });
+
   const rec = e.target.closest('[data-recommend]');
   if (rec) return openRecommend(rec.dataset.recommend, rec.dataset.title);
 });
+
+async function toggleHeart(btn, fields) {
+  const on = !btn.classList.contains('on');
+  btn.disabled = true;
+  try {
+    await api('friends', { method: 'POST', body: { action: 'heart', ...fields, on } });
+    btn.classList.toggle('on', on);
+    btn.classList.toggle('pop', on);
+    btn.setAttribute('aria-pressed', String(on));
+    btn.title = on ? 'You enjoyed this too (click to undo)' : 'I enjoyed this too';
+    if (on) toast('Sent. They’ll see you enjoyed it too.');
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 async function showFriendShelf(id) {
   const box = $('#friend-shelf');
@@ -265,6 +322,7 @@ async function showFriendShelf(id) {
               <span class="muted small">${esc(i.creator || '')}${i.rating ? ` · ${'★'.repeat(Math.floor(i.rating))}${i.rating % 1 ? '½' : ''}` : ''}</span>
             </span>
             <span class="lib-actions">
+              ${heartBtn(i.hearted, `data-heart="${esc(i.uid)}" data-friend="${esc(friend.id)}" data-title="${esc(i.title)}"`)}
               ${i.available ? `<button class="btn ghost small" data-ask="${esc(i.uid)}" data-friend="${esc(friend.id)}" data-title="${esc(i.title)}">Ask to borrow</button>` : i.owned ? '<span class="muted small">Lent out</span>' : ''}
             </span>
           </li>`).join('')}</ul>`).join('')}`;
@@ -339,6 +397,54 @@ function applyTypes(types) {
     if (m) (a.closest('li') || a).hidden = !isOn(m[1]);
   });
 }
+// ───────── updates (Settings) ─────────
+const ghLink = (repo) => `<a href="https://github.com/${esc(repo)}" target="_blank" rel="noopener">${esc(repo)}</a>`;
+const SOURCE_HINT = 'If you set up MyShelf by forking it, put your fork’s address (like <code>https://github.com/you/myshelf</code>) in <strong>Source code link</strong> above and save.';
+const TOKEN_HINT = (repo) => `To check for and install updates from here, add a <strong>GITHUB_TOKEN</strong> secret to your Worker: a GitHub fine-grained token for just ${ghLink(repo)} with <em>Contents: Read and write</em>. Until then, use <strong>Sync fork</strong> on your repository’s GitHub page.`;
+async function loadUpdates() {
+  const box = $('#updates');
+  box.innerHTML = '<p class="muted">Checking for a new version…</p>';
+  let u;
+  try { u = await api('updates'); } catch (err) { box.innerHTML = `<p class="error">${esc(err.message)}</p>`; return; }
+  const again = '<button type="button" class="btn ghost small" data-updates="check">Check again</button>';
+  if (u.status === 'behind') {
+    const list = u.changes.length ? `<ul class="updates-list">${u.changes.map((c) => `<li>${esc(c.message)}${c.date ? ` <span class="muted small">${fmt(c.date)}</span>` : ''}</li>`).join('')}</ul>` : '';
+    box.innerHTML = `<p><strong>A new version is available</strong> from ${ghLink(u.upstream)} (${u.behind} ${u.behind === 1 ? 'change' : 'changes'}).</p>${list}
+      ${u.canSync ? `<div class="row"><button type="button" class="btn primary" data-updates="sync">Update now</button>${again}</div>` : `<p class="muted small">${TOKEN_HINT(u.repo)}</p>${again}`}`;
+  } else if (u.status === 'up-to-date') {
+    box.innerHTML = `<p>✓ Up to date with ${ghLink(u.upstream)}.${u.yours ? ` <span class="muted small">Your copy also has ${u.yours} change${u.yours === 1 ? '' : 's'} of its own.</span>` : ''}</p>
+      ${u.canSync ? '' : `<p class="muted small">${TOKEN_HINT(u.repo)}</p>`}${again}`;
+  } else if (u.status === 'no-token') {
+    box.innerHTML = `<p class="muted">${TOKEN_HINT(u.repo)}</p>`;
+  } else if (u.status === 'not-fork') {
+    box.innerHTML = `<p class="muted">${ghLink(u.repo)} isn’t a fork of another MyShelf, so there’s nothing to update it from. ${SOURCE_HINT}</p>`;
+  } else if (u.status === 'no-repo' || u.status === 'not-found') {
+    box.innerHTML = `<p class="muted">${u.repo ? `Couldn’t find ${esc(u.repo)} on GitHub.` : 'This site doesn’t know which GitHub repository it runs from.'} ${SOURCE_HINT}</p>`;
+  } else if (u.status === 'bad-token') {
+    box.innerHTML = `<p class="error">GitHub didn’t accept your GITHUB_TOKEN. It may have expired: make a new one and replace the secret.</p>${again}`;
+  } else {
+    box.innerHTML = `<p class="error">Couldn’t check for updates: ${esc(u.message || 'unknown error')}</p>${again}`;
+  }
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-updates]');
+  if (!b) return;
+  if (b.dataset.updates === 'check') return loadUpdates();
+  b.disabled = true;
+  b.textContent = 'Updating…';
+  try {
+    const r = await api('updates', { method: 'POST', body: {} });
+    $('#updates').innerHTML = r.updated
+      ? '<p><strong>Updated.</strong> Cloudflare is rebuilding your site now, and the new version goes live in a couple of minutes. Reload the page after that.</p>'
+      : `<p>${esc(r.message)}</p>`;
+  } catch (err) {
+    b.disabled = false;
+    b.textContent = 'Update now';
+    toast(err.message, 'error');
+  }
+});
+document.addEventListener('myshelf:tab', (e) => { if (e.detail === 'settings') loadUpdates(); });
+
 document.addEventListener('myshelf:ready', loadSite);
 document.addEventListener('myshelf:tab', (e) => { if (e.detail === 'settings') loadSite(); });
 siteForm.addEventListener('submit', async (e) => {

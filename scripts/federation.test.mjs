@@ -172,6 +172,75 @@ test('friends: request, accept, friends-only shelf, borrow, recommend', async ()
   assert.equal((await fed.overview(bea, `${B}/api/friends`)).friends.length, 0);
 });
 
+test('friends: hearts — enjoy a friend’s item, once per item, and take it back', async () => {
+  const A = 'https://alex.example', B = 'https://bea.example';
+  const alex = fakeEnv(), bea = fakeEnv();
+  await saveSite(alex, { title: 'Alex Shelf', owner: 'Alex' });
+  await saveSite(bea, { title: 'Bea Shelf', owner: 'Bea' });
+  const net = network({ [A]: alex, [B]: bea });
+  await saveItem(bea, { item: { title: 'Dune', type: 'book', status: 'finished' }, body: '' });
+  await saveItem(bea, { item: { title: 'Diary', type: 'book', status: 'finished', visibility: 'private' }, body: '' });
+  const duneUid = (await getItem(bea, 'book-dune')).uid;
+  const diaryUid = (await getItem(bea, 'book-diary')).uid;
+
+  // Not friends yet: refused.
+  await fed.addFriend(alex, `${A}/api/friends`, B, '', net);
+  const bid = (await fed.overview(alex, `${A}/api/friends`)).friends[0].id;
+  await assert.rejects(fed.heart(alex, `${A}/api/friends`, { friendId: bid, uid: duneUid }, net), /aren’t friends/);
+  await fed.acceptFriend(bea, `${B}/api/friends`, (await fed.overview(bea, `${B}/api/friends`)).friends[0].id, net);
+
+  // Alex hearts Dune (twice — Bea gets one note), by id and then by site address.
+  await fed.heart(alex, `${A}/api/friends`, { friendId: bid, uid: duneUid, title: 'Dune' }, net);
+  await fed.heart(alex, `${A}/api/friends`, { friendUrl: B, uid: duneUid, title: 'Dune' }, net);
+  let hearts = (await fed.overview(bea, `${B}/api/friends`)).inbox.filter((m) => m.kind === 'heart');
+  assert.equal(hearts.length, 1);
+  assert.equal(hearts[0].fromName, 'Alex');
+  assert.equal(hearts[0].payload.item.title, 'Dune');
+  assert.equal(hearts[0].payload.item.slug, 'book-dune');
+  assert.deepEqual(await fed.heartsSent(alex), [{ friendUrl: B, uid: duneUid }]);
+  assert.equal((await fed.friendShelf(alex, `${A}/api/friends`, bid, net)).items.find((i) => i.title === 'Dune').hearted, true);
+
+  // Private items and made-up uids can't be hearted, and nothing is recorded.
+  await assert.rejects(fed.heart(alex, `${A}/api/friends`, { friendId: bid, uid: diaryUid }, net), /isn’t on this shelf/);
+  await assert.rejects(fed.heart(alex, `${A}/api/friends`, { friendId: bid, uid: crypto.randomUUID() }, net), /isn’t on this shelf/);
+  assert.equal((await fed.heartsSent(alex)).length, 1);
+
+  // Taking it back removes the unread note and the filled heart.
+  await fed.heart(alex, `${A}/api/friends`, { friendId: bid, uid: duneUid, on: false }, net);
+  hearts = (await fed.overview(bea, `${B}/api/friends`)).inbox.filter((m) => m.kind === 'heart');
+  assert.equal(hearts.length, 0);
+  assert.deepEqual(await fed.heartsSent(alex), []);
+  assert.equal((await fed.friendShelf(alex, `${A}/api/friends`, bid, net)).items.find((i) => i.title === 'Dune').hearted, false);
+
+  // Hearting again after taking it back sends a fresh note.
+  await fed.heart(alex, `${A}/api/friends`, { friendId: bid, uid: duneUid }, net);
+  assert.equal((await fed.overview(bea, `${B}/api/friends`)).inbox.filter((m) => m.kind === 'heart').length, 1);
+
+  // Unfriending clears hearts on both sides.
+  await fed.removeFriend(alex, `${A}/api/friends`, bid, net);
+  assert.deepEqual(await fed.heartsSent(alex), []);
+  assert.equal((await bea.DB.prepare('SELECT COUNT(*) AS n FROM hearts_received').first()).n, 0);
+});
+
+test('friends: hearting a friend on an older MyShelf explains why it didn’t go through', async () => {
+  const A = 'https://a.example', B = 'https://b.example';
+  const a = fakeEnv(), b = fakeEnv();
+  await saveSite(b, { title: 'B', owner: 'Bo' });
+  const net = network({ [A]: a, [B]: b });
+  await fed.addFriend(a, `${A}/api/friends`, B, '', net);
+  await fed.acceptFriend(b, `${B}/api/friends`, (await fed.overview(b, `${B}/api/friends`)).friends[0].id, net);
+  // Pretend B's site predates hearts.
+  const old = async (url, init) => {
+    if (new URL(url).pathname === INBOX_PATH && init?.body && JSON.parse(init.body).kind === 'heart') {
+      return Response.json({ error: 'Unknown message' }, { status: 400 });
+    }
+    return net(url, init);
+  };
+  const id = (await fed.overview(a, `${A}/api/friends`)).friends[0].id;
+  await assert.rejects(fed.heart(a, `${A}/api/friends`, { friendId: id, uid: crypto.randomUUID() }, old), /Bo’s MyShelf needs an update/);
+  assert.deepEqual(await fed.heartsSent(a), []);
+});
+
 test('friends: adding each other at the same time connects right away', async () => {
   const A = 'https://a.example', B = 'https://b.example';
   const a = fakeEnv(), b = fakeEnv();

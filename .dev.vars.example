@@ -9,3 +9,4 @@ SPOTIFY_CLIENT_ID= # music (optional)
 SPOTIFY_CLIENT_SECRET= # music (optional)
 GOOGLE_BOOKS_KEY= # optional
 CONTACT_EMAIL= # optional
+GITHUB_TOKEN= # optional: lets Manage → Settings → Updates sync your fork

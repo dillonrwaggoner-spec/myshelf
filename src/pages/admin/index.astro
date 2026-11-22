@@ -50,6 +50,10 @@ const typesJson = JSON.stringify(TYPES);
             <button class="btn primary" type="submit">Search</button>
             <button class="btn ghost" type="button" id="manual-add">Add manually</button>
           </form>
+          <form id="link-form" class="row link-form" hidden>
+            <input id="link-url" type="url" inputmode="url" placeholder="Can't find it? Paste a BoardGameGeek link…" autocomplete="off" />
+            <button class="btn ghost" type="submit">Look up</button>
+          </form>
           <p id="search-msg" class="muted"></p>
           <div id="results" class="results"></div>
         </div>
@@ -92,7 +96,10 @@ const typesJson = JSON.stringify(TYPES);
         <div class="panel">
           <h2>Friends</h2>
           <p class="muted">Connect with friends who run their own MyShelf. Friends can see items you mark <em>Friends only</em>, send you recommendations, and ask to borrow things you own.</p>
-          <h3>Inbox</h3>
+          <div class="inbox-head">
+            <h3>Inbox</h3>
+            <button id="inbox-clear" class="btn ghost small" type="button" hidden>Clear inbox</button>
+          </div>
           <ul id="inbox-list" class="inbox-list"></ul>
           <h3>Your friends</h3>
           <ul id="friend-list" class="friend-list"></ul>
@@ -134,6 +141,8 @@ const typesJson = JSON.stringify(TYPES);
             </fieldset>
             <div class="row span2"><button class="btn primary" type="submit">Save</button><span id="site-msg" class="muted small"></span></div>
           </form>
+          <h2>Updates</h2>
+          <div id="updates" class="updates"><p class="muted">Checking for a new version…</p></div>
           <h2>Backup &amp; restore</h2>
           <p class="muted">A backup is one JSON file with all your entries, notes, collections, shelf orders and site settings. Restoring adds those to this site, replacing entries with the same name. Moving to a new site? Restore here while the old site is still online and the covers are copied over from it.</p>
           <div class="row">

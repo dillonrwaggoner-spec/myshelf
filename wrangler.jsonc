@@ -10,6 +10,9 @@
   // global_fetch_strictly_public: lets two MyShelf Workers on the same Cloudflare account reach each other
   // over their public URLs (handy for testing friends features with a second copy).
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // Turn on the free myshelf.<subdomain>.workers.dev address on every deploy, so a new site
+  // doesn't come up with "No URL enabled". (A brand-new account still picks its subdomain once.)
+  "workers_dev": true,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS"

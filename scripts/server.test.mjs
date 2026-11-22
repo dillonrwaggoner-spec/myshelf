@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildMarkdown, parseMarkdown, normalizeItem } from '../server/markdown.js';
-import { parseBggSearch, parseBggThings, search, details, igdbScore } from '../server/providers.js';
+import { parseBggSearch, parseBggThings, search, details, igdbScore, rankBggHits, bggIdFromUrl } from '../server/providers.js';
 import { saveItem, deleteItem } from '../server/save.js';
 import { checkAuth } from '../server/auth.js';
 import { GET as searchHandler } from '../src/pages/api/search.js';
@@ -78,7 +78,7 @@ const BGG_THING = `<?xml version="1.0" encoding="utf-8"?><items termsofuse="x">
 test('BGG XML parsing', () => {
   const hits = parseBggSearch(BGG_SEARCH);
   assert.equal(hits.length, 3);
-  assert.deepEqual(hits[0], { id: '266192', name: 'Wingspan', year: '2019' });
+  assert.deepEqual(hits[0], { id: '266192', kind: 'boardgame', name: 'Wingspan', year: '2019' });
   const [t] = parseBggThings(BGG_THING);
   assert.equal(t.title, 'Wingspan');
   assert.equal(t.image, 'https://cf.geekdo-images.com/big.jpg');
@@ -102,6 +102,36 @@ test('BGG search: sends token, dedupes, enriches', async () => {
   assert.equal(res[0].cover, 'https://cf.geekdo-images.com/big.jpg');
   assert.equal(calls[0].init.headers.authorization, 'Bearer tok');
   assert.match(calls[1].url, /id=266192,999/);
+});
+
+test('BGG ranking: base game beats a pile of same-named expansions', () => {
+  const exp = (id, name) => [
+    `<item type="boardgame" id="${id}"><name type="primary" value="${name}"/></item>`,
+    `<item type="boardgameexpansion" id="${id}"><name type="primary" value="${name}"/></item>`,
+  ].join('');
+  const names = ['Adventurer Expansion', 'Dirty Thirteen', 'Freaks & Psychos', 'Malingerers', 'Missions I', 'Missions II',
+    'Missions III and Fleshy Mess', 'Promo Cards', 'Bad Luck Deck', 'Curse Deck', 'Extra Dice', 'Gonzo Pack', 'Mega Pack', 'Misc'];
+  const xml = `<items>${names.map((n, i) => exp(1000 + i, `Dungeon Degenerates: ${n}`)).join('')}
+    <item type="boardgame" id="210232"><name type="primary" value="Dungeon Degenerates: Hand of Doom"/><yearpublished value="2017"/></item></items>`;
+  const ranked = rankBggHits(parseBggSearch(xml), 'dungeon degenerates');
+  assert.equal(ranked[0].id, '210232');
+  assert.equal(new Set(ranked.map((h) => h.id)).size, ranked.length);
+  // Matching the part after the colon counts as an exact title match.
+  assert.equal(rankBggHits(parseBggSearch(xml), 'hand of doom')[0].id, '210232');
+});
+
+test('BGG link lookup', async () => {
+  assert.equal(bggIdFromUrl('https://boardgamegeek.com/boardgame/210232/dungeon-degenerates-hand-doom'), '210232');
+  assert.equal(bggIdFromUrl('boardgamegeek.com/boardgameexpansion/12345'), '12345');
+  assert.equal(bggIdFromUrl('https://example.com/'), null);
+  const calls = mockFetch([['xmlapi2/thing', () => BGG_THING]]);
+  const res = await search('boardgame', 'https://boardgamegeek.com/boardgame/266192/wingspan', { BGG_TOKEN: 'tok' });
+  assert.equal(res.length, 1);
+  assert.equal(res[0].title, 'Wingspan');
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /thing\?id=266192/);
+  mockFetch([['xmlapi2/thing', () => '<items></items>']]);
+  await assert.rejects(search('boardgame', 'https://boardgamegeek.com/boardgame/1/x', { BGG_TOKEN: 'tok' }), /No game found/);
 });
 
 test('TMDB search + details (bearer token)', async () => {

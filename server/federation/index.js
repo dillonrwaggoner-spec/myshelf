@@ -75,7 +75,15 @@ async function saveFriend(env, f) {
 
 async function deleteFriend(env, id) {
   const DB = await ensureSchema(env);
+  const f = await DB.prepare('SELECT url FROM friends WHERE id = ?').bind(id).first();
   await DB.prepare('DELETE FROM friends WHERE id = ?').bind(id).run();
+  // Hearts only mean something between friends.
+  if (f) {
+    await DB.batch([
+      DB.prepare('DELETE FROM hearts_sent WHERE friend_url = ?').bind(f.url),
+      DB.prepare('DELETE FROM hearts_received WHERE from_url = ?').bind(f.url),
+    ]);
+  }
 }
 
 async function addInbox(env, { id, from, kind, payload, status = 'unread' }) {
@@ -247,6 +255,32 @@ export async function receive(env, request, fetcher = fetch) {
     return { ok: true };
   }
 
+  if (msg.kind === 'heart') {
+    const row = await getItemByUid(env, str(msg.item?.uid, 40));
+    // Friends can see public and friends-only items, so those are the ones they can heart.
+    if (!row || row.item.visibility === 'private') throw new HttpError(404, 'That item isn’t on this shelf');
+    const DB = await ensureSchema(env);
+    const had = await DB.prepare('SELECT inbox_id FROM hearts_received WHERE from_url = ? AND uid = ?').bind(from, row.uid).first();
+    if (msg.on === false) {
+      if (had) {
+        await DB.batch([
+          DB.prepare('DELETE FROM hearts_received WHERE from_url = ? AND uid = ?').bind(from, row.uid),
+          // Take the inbox note away too, unless it's already been read.
+          DB.prepare(`DELETE FROM inbox WHERE id = ? AND status = 'unread'`).bind(had.inbox_id || ''),
+        ]);
+      }
+      return { ok: true, on: false };
+    }
+    if (had) return { ok: true, on: true }; // already hearted: no second inbox note
+    const it = row.item;
+    await addInbox(env, {
+      id: msg.id, from, kind: 'heart',
+      payload: { item: { uid: row.uid, slug: row.slug, title: it.title, type: it.type, creator: it.creator || '', cover: it.cover || '', visibility: it.visibility || 'public' } },
+    });
+    await DB.prepare('INSERT OR IGNORE INTO hearts_received (from_url, uid, inbox_id, created_at) VALUES (?, ?, ?, ?)').bind(from, row.uid, msg.id, now()).run();
+    return { ok: true, on: true };
+  }
+
   if (msg.kind === 'borrow-reply') {
     await addInbox(env, {
       id: msg.id, from, kind: msg.kind,
@@ -322,9 +356,36 @@ async function listItemsWithKeys(env, visibility) {
   return (results || []).map((r) => ({ slug: r.slug, uid: r.uid, extKey: r.ext_key, item: JSON.parse(r.data) }));
 }
 
+// ───────── keeping friends' names current ─────────
+
+const NAME_REFRESH_MS = 15 * 60 * 1000; // re-check each friend's name and owner at most every 15 minutes
+const NAME_WAIT_MS = 3000;              // never hold a page up longer than this for it
+
+/**
+ * A friend's name and owner are first saved when you connect. If they change them later in their
+ * Settings (or set them for the first time), re-read their /.well-known/myshelf and update ours.
+ * Only a site still holding the key we know can change its name. Failures are ignored.
+ */
+export async function refreshFriendNames(env, { force = false, fetcher = fetch } = {}) {
+  const DB = await ensureSchema(env);
+  const cutoff = force ? '9999' : new Date(Date.now() - NAME_REFRESH_MS).toISOString();
+  const { results } = await DB.prepare(`SELECT * FROM friends WHERE status IN ('accepted', 'requested', 'pending') AND updated_at < ?`).bind(cutoff).all();
+  const work = Promise.all((results || []).map(async (r) => {
+    let name = r.name, owner = r.owner;
+    try {
+      const info = await discover(r.url, fetcher);
+      if (info.publicKey === r.public_key) ({ name, owner } = info);
+    } catch {}
+    // Stamp the check even when it failed, so a site that's down isn't retried on every page load.
+    await DB.prepare('UPDATE friends SET name = ?, owner = ?, updated_at = ? WHERE id = ?').bind(str(name, 80), str(owner, 80), now(), r.id).run();
+  }));
+  await Promise.race([work, new Promise((r) => setTimeout(r, NAME_WAIT_MS))]).catch(() => {});
+}
+
 // ───────── admin actions (behind your token) ─────────
 
 export async function overview(env, requestUrl) {
+  await refreshFriendNames(env);
   const DB = await ensureSchema(env);
   const [me, friends, inbox] = await Promise.all([
     wellKnown(env, requestUrl),
@@ -461,6 +522,20 @@ export async function replyToBorrow(env, requestUrl, { inboxId, answer, note }, 
   return { ok: true };
 }
 
+/**
+ * Empty the inbox, except messages still waiting on an answer: friend requests you haven't
+ * accepted or declined, and borrow requests you haven't replied to.
+ */
+export async function clearInbox(env) {
+  const DB = await ensureSchema(env);
+  const res = await DB.prepare(
+    `DELETE FROM inbox WHERE NOT (status IN ('unread', 'read') AND (
+       kind = 'borrow-request' OR
+       (kind = 'friend-request' AND from_url IN (SELECT url FROM friends WHERE status = 'pending'))))`,
+  ).run();
+  return { ok: true, cleared: res.meta?.changes ?? 0 };
+}
+
 export async function markMessage(env, id, status) {
   if (!['read', 'unread', 'done'].includes(status)) throw new HttpError(400, 'Unknown status');
   await inboxById(env, id);
@@ -482,16 +557,69 @@ export async function friendShelf(env, requestUrl, id, fetcher = fetch) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new HttpError(502, data.error || `Their site answered ${res.status}`);
   const mine = new Set((await listItemsWithKeys(env, null)).map((r) => r.extKey).filter(Boolean));
+  const hearted = new Set((await heartsSent(env, f.url)).map((h) => h.uid));
   return {
     friend: { id: f.id, url: f.url, name: f.name, owner: f.owner },
-    items: (Array.isArray(data.items) ? data.items : []).slice(0, 5000).map((i) => ({ ...i, youHave: Boolean(i.extKey && mine.has(i.extKey)) })),
+    items: (Array.isArray(data.items) ? data.items : []).slice(0, 5000).map((i) => ({
+      ...i, youHave: Boolean(i.extKey && mine.has(i.extKey)), hearted: hearted.has(i.uid),
+    })),
   };
+}
+
+// ───────── hearts ─────────
+
+/** Hearts you've given: all of them, or just those on one friend's items. → [{ friendUrl, uid }] */
+export async function heartsSent(env, friendUrl = null) {
+  const DB = await ensureSchema(env);
+  const q = friendUrl
+    ? DB.prepare('SELECT friend_url, uid FROM hearts_sent WHERE friend_url = ?').bind(friendUrl)
+    : DB.prepare('SELECT friend_url, uid FROM hearts_sent');
+  const { results } = await q.all();
+  return (results || []).map((r) => ({ friendUrl: r.friend_url, uid: r.uid }));
+}
+
+/**
+ * Heart a friend's item ("I enjoyed this too"), or take the heart back with on: false.
+ * The friend is picked by id (Manage → Friends) or by site address (the public Friends page).
+ */
+export async function heart(env, requestUrl, { friendId, friendUrl, uid, title, on = true }, fetcher = fetch) {
+  let f;
+  if (friendId) f = await acceptedFriend(env, friendId);
+  else {
+    const byUrl = await friendByUrl(env, cleanSiteUrl(friendUrl));
+    if (!byUrl) throw new HttpError(404, 'Friend not found');
+    f = await acceptedFriend(env, byUrl.id);
+  }
+  const id = str(uid, 40);
+  if (!id) throw new HttpError(400, 'Which item?');
+  const yes = on !== false;
+  try {
+    await send(env, requestUrl, f.url, 'heart', { item: { uid: id }, on: yes }, fetcher);
+  } catch (err) {
+    // A friend on an older copy of MyShelf doesn't know about hearts yet.
+    if (/Unknown message/.test(err.message)) {
+      const who = f.owner || f.name;
+      throw new HttpError(502, `${who ? `${who}’s` : 'Their'} MyShelf needs an update before it can get hearts.`);
+    }
+    throw err;
+  }
+  const DB = await ensureSchema(env);
+  if (yes) {
+    await DB.prepare(
+      `INSERT INTO hearts_sent (friend_url, uid, title, created_at) VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT (friend_url, uid) DO UPDATE SET title = ?3`,
+    ).bind(f.url, id, str(title, 200), now()).run();
+  } else {
+    await DB.prepare('DELETE FROM hearts_sent WHERE friend_url = ? AND uid = ?').bind(f.url, id).run();
+  }
+  return { ok: true, on: yes };
 }
 
 // ───────── public friends page ─────────
 
 /** Accepted friends, safe to show anyone: name, owner and address. */
 export async function publicFriends(env) {
+  await refreshFriendNames(env);
   const DB = await ensureSchema(env);
   const { results } = await DB.prepare(`SELECT url, name, owner FROM friends WHERE status = 'accepted' ORDER BY owner, name`).all();
   return (results || []).map((r) => ({ url: r.url, name: r.name, owner: r.owner }));

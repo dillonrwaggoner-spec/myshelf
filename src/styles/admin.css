@@ -13,7 +13,10 @@
 code { background: var(--paper-2); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
 
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
-.row input[type='search'], .row input[type='password'] { flex: 1 1 260px; }
+.row input[type='search'], .row input[type='password'], .row input[type='url'] { flex: 1 1 260px; }
+.row[hidden] { display: none; }
+.link-form { margin-top: -4px; }
+.link-form input { font-size: 0.92rem; }
 
 input, select, textarea {
   font: inherit; color: var(--ink); background: #fffaf0;
@@ -208,6 +211,13 @@ details label { margin-bottom: 10px; }
 .panel h4 { margin: 16px 0 4px; color: var(--ink); }
 .my-address { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; padding: 10px 12px; border-radius: 10px; border: 1px dashed var(--accent); }
 .my-address code { font-size: 0.95rem; word-break: break-all; }
+.updates { margin: 6px 0 4px; }
+.updates p { margin: 0 0 10px; }
+.updates-list { margin: 0 0 12px; padding-left: 20px; }
+.updates-list li { margin: 2px 0; }
+.updates .row { gap: 10px; align-items: center; }
+#inbox-clear[hidden] { display: none; }
+.inbox-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .inbox-list, .friend-list { list-style: none; padding: 0; margin: 6px 0 0; }
 .inbox-row, .friend-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid #e2d6bd; }
 .inbox-row.unread { box-shadow: inset 3px 0 0 var(--accent); padding-left: 10px; }
@@ -261,3 +271,16 @@ details label { margin-bottom: 10px; }
 .media-types legend { font-weight: 600; padding: 0 6px; }
 .media-types p { margin: 0 0 8px; }
 .site-nav a[hidden], .fab-menu li[hidden], .type-btn[hidden] { display: none !important; }
+
+/* Hearts: "I enjoyed this too" on a friend's item */
+.heart-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 50%; cursor: pointer; background: transparent; border: 1px solid #d5c6a8; color: var(--ink-soft); transition: color 0.15s, border-color 0.15s, transform 0.15s; }
+.heart-btn svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+.heart-btn:hover { color: var(--accent); border-color: var(--accent); }
+.heart-btn.on { color: var(--accent); border-color: var(--accent); }
+.heart-btn.on svg { fill: currentColor; }
+.heart-btn.pop { animation: heart-pop 0.25s ease-out; }
+.heart-btn:disabled { opacity: 0.6; cursor: wait; }
+.heart-mark { color: var(--accent); vertical-align: -3px; }
+.heart-mark svg { fill: currentColor; width: 16px; height: 16px; }
+@keyframes heart-pop { 50% { transform: scale(1.2); } }
+@media (prefers-reduced-motion: reduce) { .heart-btn.pop { animation: none; } }
