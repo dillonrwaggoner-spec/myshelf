@@ -1,0 +1,14 @@
+name: Sync from Lex's MyShelf
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Mondays at 09:00 UTC
+  workflow_dispatch:      # adds a "Run workflow" button too
+permissions:
+  contents: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh repo sync ${{ github.repository }} -b main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
