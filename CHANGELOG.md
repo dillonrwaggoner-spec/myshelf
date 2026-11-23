@@ -2,6 +2,28 @@
 
 The version number lives in `package.json` and shows in **Manage → Settings → Updates**. Bump it with each release.
 
+## 0.3.7 (Nov 2026)
+
+- Fixed: in the decorations preview, the shelf's edge drew on top of decorations that overlap it. They now always draw in front of the bookcase, as on the live page.
+
+## 0.3.6 (Nov 2026)
+
+- **Up / down for shelf decorations.** A new slider raises a decoration above the shelf (0 = standing on it), next to **Left / right**. Dragging in the preview moves it both ways (a sideways drag stays level), and the up/down arrow keys nudge it 1px at a time, or 10px with Shift. Phones get their own up/down too.
+
+## 0.3.5 (Nov 2026)
+
+- **The decorations preview is your real Shelves page.** Settings shows your actual home page in a small window, at desktop width or at your phone's width, with your changes drawn live. It can't differ from what visitors see, on any phone or browser. Drag and arrow-key nudges work right in it.
+
+## 0.3.4 (Nov 2026)
+
+- **Manage in the phone menu.** The bubble menu now has Manage under Journal, so you don't have to scroll to the footer.
+- Fixed: shelf decorations could sit off-center or get extra space inside their frame on iPhones (Safari, which every iPhone browser uses, sized them differently from the Settings preview). Each decoration now gets an exact width from its image's proportions, so every browser draws it the same. The decoration area also can't make a phone page wider than the screen.
+
+## 0.3.3 (Nov 2026)
+
+- **Separate phone layout for shelf decorations.** Switch the Settings preview to **Phone**, and the sliders edit phones only: position, size, tilt, turn, and **Show on phones**. Until you change something there, phones follow desktop at about two-thirds size. **Match desktop again** undoes it. Frame and Mirror are shared.
+- Fixed: decorations no longer shrink as they get close to the right edge.
+
 ## 0.3.2 (Nov 2026)
 
 - **Turn** for shelf decorations: angle one on the shelf in 3D, the way you'd set a frame at an angle instead of head-on. Framed pictures shade the side turning away. **Tilt** (leaning flat) is still there, and the two can be combined. New JPGs start framed and turned slightly.

@@ -1,39 +1,49 @@
 /* Shelf decorations: up to three images standing on top of the bookcase (main Shelves page), and the
-   preview of them in Manage → Settings. Each sets --x (where its middle sits, % of the width), --h (height),
-   --tilt (leaning flat) and --turn (angled on the shelf, in 3D); --decor-scale shrinks them on phones and in
-   the preview. See src/lib/decor.js for the markup. */
+   preview of them in Manage → Settings. Each decoration carries two sets of variables (see src/lib/decor.js):
+   --x --y --h --tilt --turn … for desktop and --xm --ym --hm … for phones. The rules below copy one set into the
+   working variables (--X --H …), phones by screen width. (The Settings preview is this page in a frame.) */
 .bookcase-top {
-  position: relative; margin-top: 8px; pointer-events: none;
-  --decor-scale: 1;
-  height: calc(var(--decor-max, 120px) * var(--decor-scale) + 10px);
+  position: relative; margin-top: 8px; pointer-events: none; --M: var(--decor-max, 120px); height: calc(var(--M) + 10px);
+  overflow-x: clip; /* never wider than the page, even before keepInside() has run (phones would zoom out) */
+  z-index: 1; /* always in front of the bookcase where they overlap its top edge (the preview's faded shelf would cover them) */
 }
-@media (max-width: 760px) { .bookcase-top { --decor-scale: 0.68; } }
+.decor { --X: var(--x); --Y: var(--y); --H: var(--h); --T: var(--tilt); --O: var(--origin); --R: var(--turn); --S: var(--shade); --SD: var(--shade-dir); --D: var(--show); }
+@media (max-width: 760px) {
+  .bookcase-top { --M: var(--decor-max-m, 80px); }
+  .bookcase-top .decor { --X: var(--xm); --Y: var(--ym); --H: var(--hm); --T: var(--tiltm); --O: var(--originm); --R: var(--turnm); --S: var(--shadem); --SD: var(--shade-dirm); --D: var(--showm); }
+}
 
 .decor {
-  position: absolute; bottom: -3px; /* stands on the top board */
-  left: var(--x, 50%);
-  height: calc(var(--h, 110px) * var(--decor-scale));
-  display: block; max-width: 45%;
+  position: absolute; bottom: calc(var(--Y, 0px) - 3px); /* stands on the top board, or raised by --Y */
+  left: var(--X, 50%);
+  display: var(--D, block);
+  height: var(--H, 110px);
+  /* Its own natural width wherever it sits (otherwise it gets squeezed as it nears the right edge). */
+  width: max-content; max-width: none;
   /* --nudge: keepInside(). A tilt pivots on the bottom corner it leans towards, so that corner stays on the shelf. */
-  transform: translateX(calc(-50% + var(--nudge, 0px))) rotate(var(--tilt, 0deg));
-  transform-origin: var(--origin, 50%) 100%;
+  transform: translateX(calc(-50% + var(--nudge, 0px))) rotate(var(--T, 0deg));
+  transform-origin: var(--O, 50%) 100%;
   filter: drop-shadow(0 6px 6px rgba(0,0,0,0.55));
   user-select: none;
 }
 .decor-face {
-  position: relative; display: block; height: 100%; box-sizing: border-box;
+  position: relative; display: block; height: 100%; width: max-content; box-sizing: border-box;
   /* Turned on its upright axis, with perspective (700px, also in src/lib/decor.js), so it recedes. */
-  transform: perspective(700px) rotateY(var(--turn, 0deg));
+  transform: perspective(700px) rotateY(var(--R, 0deg));
   transform-origin: 50% 100%;
 }
-.decor img { display: block; height: 100%; width: auto; max-width: 100%; object-fit: contain; object-position: bottom; -webkit-user-drag: none; }
+.decor img { display: block; height: 100%; width: auto; max-width: none; object-fit: contain; object-position: bottom; -webkit-user-drag: none; }
+/* Exact sizes from the image's proportions (--a), so every browser draws it the same:
+   the picture is (height − frame) tall and that × --a wide; the frame (--edge each side: border + mat) goes around it. */
+.decor.sized { --edge: 0px; width: calc((var(--H, 110px) - 2 * var(--edge)) * var(--a) + 2 * var(--edge)); }
+.decor.sized .decor-face { width: 100%; }
+.decor.sized img { width: 100%; }
 .decor.flip img { transform: scaleX(-1); }
 
 /* "Frame": for photos (a JPG, or anything with a background) — a picture frame with a mat around the image. */
+.decor.framed { --fw: max(4px, calc(var(--H, 110px) * 0.07)); --mat: max(3px, calc(var(--H, 110px) * 0.045)); --edge: calc(var(--fw) + var(--mat)); }
 .decor.framed .decor-face {
-  --fh: calc(var(--h, 110px) * var(--decor-scale));
-  --fw: max(4px, calc(var(--fh) * 0.07));
-  border: var(--fw) solid; padding: max(3px, calc(var(--fh) * 0.045));
+  border: var(--fw) solid; padding: var(--mat);
   background: #f4efe4;
   box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25), inset 0 2px 6px rgba(0,0,0,0.25);
 }
@@ -43,10 +53,21 @@
 .decor.framed.frame-gold .decor-face { border-color: #e2bd62 #c79a3a #a87d26 #d4ab4e; }
 .decor.framed.frame-white .decor-face { border-color: #faf8f3 #e9e5dc #dcd7cc #f0ece4; }
 
-/* A framed picture that's turned: the side turning away is a touch darker, so the angle reads clearly.
+/* A turned frame: the side turning away is a touch darker, so the angle reads clearly.
    (Not on cut-outs, where it would darken the see-through background.) */
-.decor.framed.turn-left .decor-face::after, .decor.framed.turn-right .decor-face::after {
+.decor.framed .decor-face::after {
   content: ''; position: absolute; inset: calc(-1 * var(--fw)); pointer-events: none;
-  background: linear-gradient(to right, rgba(0,0,0,var(--shade)), transparent 70%);
+  background: linear-gradient(var(--SD, to left), rgba(0,0,0,var(--S, 0)), transparent 70%);
 }
-.decor.framed.turn-right .decor-face::after { background: linear-gradient(to left, rgba(0,0,0,var(--shade)), transparent 70%); }
+
+/* /?decor-preview: the Shelves page as the live preview in Manage → Settings. Only the top of the bookcase shows. */
+html.decor-preview .site-header, html.decor-preview .hero, html.decor-preview .fab-nav, html.decor-preview .fab-scrim,
+html.decor-preview .site-footer, html.decor-preview .my-thoughts, html.decor-preview .back-link { display: none !important; }
+html.decor-preview main { padding-top: 10px; padding-bottom: 0; }
+html.decor-preview body { min-height: 0; overflow: hidden; }
+html.decor-preview .bookcase { height: 64px; padding: 0; border-bottom-width: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+  -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
+html.decor-preview .bookcase-top { pointer-events: auto; touch-action: none; }
+html.decor-preview .decor { cursor: grab; outline-offset: 3px; }
+html.decor-preview .decor:focus-visible, html.decor-preview .decor.dragging { outline: 2px dashed var(--accent); }
+html.decor-preview .decor.dragging { cursor: grabbing; }
