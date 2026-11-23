@@ -3,13 +3,17 @@ import Base from '../layouts/Base.astro';
 import Shelf from '../components/Shelf.astro';
 import JournalCard from '../components/JournalCard.astro';
 import CopyLink from '../components/CopyLink.astro';
+import '../styles/decor.css';
 import { getSite } from '../../server/site.js';
+import { getDecor } from '../../server/decor.js';
+import { decorStyle, decorClasses, decorInner, decorMax } from '../lib/decor.js';
 import { getItems, getShelves } from '../lib/items.js';
 import { sortShelf, inShelf, showsOnHome } from '../lib/sorting.js';
 import { TYPES, TYPE_KEYS } from '../lib/types.js';
 
 const env = Astro.locals.runtime.env;
-const [items, shelves, site] = await Promise.all([getItems(env), getShelves(env), getSite(env)]);
+const escAttr = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const [items, shelves, site, decor] = await Promise.all([getItems(env), getShelves(env), getSite(env), getDecor(env)]);
 // "My Ramblings": the entry marked Featured in the editor, or else the most recent journal entry
 // (items are already sorted newest first).
 const hasNotes = (e) => e.body && e.body.trim();
@@ -21,6 +25,14 @@ const latestThought = items.find((e) => e.data.featured === true && hasNotes(e))
     <p>{site.tagline}</p>
   </section>
 
+  {/* Shelf decorations (Manage → Settings): up to three images standing on top of the bookcase. */}
+  {decor.length > 0 && (
+    <div class="bookcase-top" aria-hidden="true" style={`--decor-max:${decorMax(decor)}px`}>
+      {decor.map((d) => (
+        <span class={decorClasses(d)} style={decorStyle(d)} set:html={decorInner(d, escAttr)} />
+      ))}
+    </div>
+  )}
   <div class="bookcase scroll-motion">
     {shelves.filter(showsOnHome).map((s) => {
       const list = sortShelf(items.filter((e) => inShelf(e.data, s)), s);
@@ -40,3 +52,15 @@ const latestThought = items.find((e) => e.data.featured === true && hasNotes(e))
     </section>
   )}
 </Base>
+
+<script>
+  // Keep shelf decorations inside the bookcase's width (a big one near an edge can hang off on a phone).
+  import { keepInside } from '../lib/decor.js';
+  const top = document.querySelector('.bookcase-top');
+  if (top) {
+    const fit = () => keepInside(top);
+    top.querySelectorAll('img').forEach((img) => { if (!img.complete) img.addEventListener('load', fit, { once: true }); });
+    fit();
+    new ResizeObserver(fit).observe(top);
+  }
+</script>

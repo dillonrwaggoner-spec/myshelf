@@ -284,3 +284,57 @@ details label { margin-bottom: 10px; }
 .heart-mark svg { fill: currentColor; width: 16px; height: 16px; }
 @keyframes heart-pop { 50% { transform: scale(1.2); } }
 @media (prefers-reduced-motion: reduce) { .heart-btn.pop { animation: none; } }
+
+/* Friend groups (Manage → Friends) */
+.group-list { list-style: none; padding: 0; margin: 6px 0 0; }
+.group-row { padding: 10px 0; border-bottom: 1px solid #e2d6bd; }
+.group-head { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.group-head .group-name { flex: 1; font-weight: 600; }
+.rec-groups { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.rec-groups[hidden], #groups-section[hidden] { display: none; }
+.version { margin: 0 0 8px; }
+
+/* ?embed=1: nothing but the editor dialog, over a transparent page */
+html.embed, html.embed body { background: transparent !important; }
+html.embed body > :not(main), html.embed #app, html.embed #login, html.embed .device-prefs { display: none !important; }
+html.embed .editor::backdrop { background: transparent; }
+
+/* Per-message delete */
+.inbox-head-actions { display: inline-flex; gap: 6px; }
+.inbox-head-actions [hidden] { display: none; }
+.inbox-ctls { display: inline-flex; gap: 2px; margin-left: 4px; }
+.inbox-ctl { font: inherit; font-size: 0.78rem; font-weight: 700; min-width: 28px; height: 28px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 6px; cursor: pointer; background: transparent; border: 1px solid transparent; color: var(--ink-soft); }
+.inbox-ctl:hover { border-color: #d5c6a8; color: var(--ink); }
+.inbox-ctl.confirm { background: var(--danger); color: #fff; border-color: var(--danger); }
+.inbox-ctl:disabled { opacity: 0.5; cursor: wait; }
+
+/* Shelf decorations (Settings) */
+.decor-preview-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 6px; }
+.decor-modes { display: inline-flex; gap: 4px; }
+.decor-modes .btn.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+/* The page's own wall behind it, so colors and shadows look the same as on the Shelves page. */
+.decor-preview { position: relative; margin: 0 0 4px; border-radius: 10px; overflow: hidden; color: var(--cream);
+  background: radial-gradient(1200px 600px at 50% -200px, #2e3035 0%, transparent 70%), var(--wall); }
+.decor-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; padding-top: 10px; }
+.decor-canvas .bookcase-top { margin-top: 0; pointer-events: auto; touch-action: none; }
+.decor-fake-case { height: 64px; padding: 0; border-bottom-width: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+  -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
+.decor-canvas .decor { cursor: grab; outline-offset: 3px; }
+.decor-canvas .decor:focus-visible, .decor-canvas .decor.dragging { outline: 2px dashed var(--accent); }
+.decor-canvas .decor.dragging { cursor: grabbing; }
+.decor-preview .decor-empty { position: absolute; left: 0; right: 0; bottom: 8px; margin: 0; text-align: center; color: #c9b79c; font-size: 1rem; }
+.decor-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.decor-row { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; border-bottom: 1px solid #e2d6bd; }
+.decor-thumb { flex: 0 0 auto; width: 64px; height: 64px; object-fit: contain; border-radius: 8px; background: repeating-conic-gradient(#e8dfcc 0 25%, #f7f1e4 0 50%) 0 0 / 14px 14px; }
+.decor-controls { flex: 1; min-width: 0; display: grid; gap: 6px; }
+.decor-field { display: grid; grid-template-columns: 72px 1fr auto; align-items: center; gap: 10px; font-size: 0.85rem; color: var(--ink-soft); }
+.decor-field input[type='range'] { width: 100%; padding: 0; accent-color: var(--accent-ink); background: none; border: 0; }
+.decor-num { display: inline-flex; align-items: center; gap: 3px; font-size: 0.82rem; }
+.decor-num input { width: 72px; padding: 4px 6px; text-align: right; }
+.decor-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 2px; }
+.decor-options label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--ink-soft); }
+.decor-options select { width: auto; padding: 5px 8px; }
+.decor-options .spacer { flex: 1; }
+#decor-add[hidden] { display: none; }
+@media (max-width: 600px) { .decor-row { flex-direction: column; } .decor-field { grid-template-columns: 60px 1fr auto; } }
+.decor-canvas.phone .decor-fake-case { border-width: 8px 8px 0; border-radius: 14px 14px 0 0; } /* like the Shelves page on a phone */
