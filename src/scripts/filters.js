@@ -15,6 +15,58 @@ function init() {
   const best = root.querySelector('#bgf-best');
   const noun = [root.dataset.noun || 'item', root.dataset.nouns || 'items'];
 
+  // ── Sort: reorder the items on every shelf. '' = the shelf's own order (as the page drew it).
+  slots.forEach((s, i) => (s.i = i));
+  const sortSel = root.querySelector('#bgf-sort');
+  const time = (v) => (v ? new Date(v).getTime() || 0 : 0);
+  const by = (f) => (a, b) => f(a, b) || a.i - b.i;
+  const SORTS = {
+    newest: by((a, b) => time(b.f.sd) - time(a.f.sd)),
+    oldest: by((a, b) => time(a.f.sd) - time(b.f.sd)),
+    title: by((a, b) => (a.f.st || '').localeCompare(b.f.st || '', undefined, { numeric: true })),
+    creator: by((a, b) => (a.f.sc || '~').localeCompare(b.f.sc || '~') || (a.f.st || '').localeCompare(b.f.st || '')),
+    rating: by((a, b) => (b.f.r ?? -1) - (a.f.r ?? -1)),
+    'year-new': by((a, b) => (b.f.y || 0) - (a.f.y || 0)),
+    'year-old': by((a, b) => (a.f.y || 9999) - (b.f.y || 9999)),
+  };
+  const applySort = () => {
+    const cmp = SORTS[sortSel?.value] || ((a, b) => a.i - b.i);
+    for (const shelf of document.querySelectorAll('.bookcase .shelf')) {
+      const mine = slots.filter((s) => shelf.contains(s.el)).sort(cmp);
+      if (!mine.length) continue;
+      const more = shelf.querySelector(':scope > .shelf-more');
+      mine.forEach((s) => shelf.appendChild(s.el)); // out of any row strips; the shelf re-packs its rows
+      if (more) shelf.appendChild(more);
+      shelf.scrollLeft = 0;
+      shelf.dispatchEvent(new CustomEvent('shelf:reorder'));
+    }
+  };
+  if (sortSel) {
+    const q0 = new URLSearchParams(location.search).get('sort');
+    if (q0 && SORTS[q0]) { sortSel.value = q0; applySort(); }
+    sortSel.addEventListener('change', () => { applySort(); writeUrl(); });
+  }
+
+  // ── Size: scale the shelves' items (saved in this browser; applied before the page draws by Base.astro).
+  const size = root.querySelector('#bgf-size');
+  const sizeReset = root.querySelector('#bgf-size-reset');
+  if (size) {
+    const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--shelf-zoom')) || 1;
+    size.value = String(cur);
+    const show = (v) => {
+      document.documentElement.style.setProperty('--shelf-zoom', String(v));
+      sizeReset.hidden = Math.abs(v - 1) < 0.001;
+    };
+    show(cur);
+    size.addEventListener('input', () => show(Number(size.value)));
+    size.addEventListener('change', () => { try { localStorage.setItem('myshelf_size', size.value); } catch {} });
+    sizeReset.addEventListener('click', () => {
+      size.value = '1';
+      show(1);
+      try { localStorage.removeItem('myshelf_size'); } catch {}
+    });
+  }
+
   const state = {};
   const reset = () => {
     for (const g of groups) state[g.key] = g.multi ? [] : '';
@@ -32,6 +84,7 @@ function init() {
       else if (state[g.key]) out.set(g.key, state[g.key]);
     }
     if (state.best && state.players) out.set('best', '1');
+    if (sortSel?.value) out.set('sort', sortSel.value);
     const qs = out.toString();
     history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
   }
@@ -100,6 +153,8 @@ function init() {
     // Shelves: update counts, hide empty ones, and tell the 3D shelf which items are visible.
     for (const section of document.querySelectorAll('.bookcase .shelf-section')) {
       const shelf = section.querySelector('.shelf');
+      // Shelves with nothing on them to begin with (a "No shelves" note, an empty one shown only while editing) are left alone.
+      if (!shelf || !shelf.querySelector('.shelf-slot')) continue;
       const visible = shelf.querySelectorAll('.shelf-slot:not([hidden])').length;
       const count = section.querySelector('.count-n') || section.querySelector('.count');
       if (count) count.textContent = visible;

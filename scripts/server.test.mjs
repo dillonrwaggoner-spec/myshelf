@@ -603,3 +603,69 @@ test('shelf decorations: PNG/WebP only, up to three, removed images are deleted,
   await restoreBackup(fresh, backup);
   assert.equal((await getDecor(fresh)).length, 2);
 });
+
+test('YouTube: links work without a key; a Books key without YouTube enabled falls back quietly', async () => {
+  const { search } = await import('../server/providers.js');
+  const real = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    calls.push(u);
+    if (u.includes('googleapis.com/youtube')) return new Response('{"error":{}}', { status: 403 });
+    if (u.includes('youtube.com/oembed')) return Response.json({ title: 'A Video', author_name: 'Some Channel' });
+    if (u.includes('i.ytimg.com')) return new Response('', { status: init.method === 'HEAD' ? 200 : 200 });
+    if (u.includes('youtube.com/@veritasium')) {
+      return new Response(`<html><head><meta property="og:title" content="Veritasium"><meta property="og:image" content="https://yt3.example/avatar.jpg">
+        <meta property="og:description" content="An element of truth &amp; more"><link rel="canonical" href="https://www.youtube.com/channel/UCHnyfMqiRRG1u-2MsSQLbXA"></head>
+        <script>{"canonicalBaseUrl":"/@veritasium"}</script></html>`, { headers: { 'content-type': 'text/html' } });
+    }
+    return new Response('nope', { status: 404 });
+  };
+  try {
+    const env = { GOOGLE_BOOKS_KEY: 'books-only' };
+    const [v] = await search('video', 'https://youtu.be/dQw4w9WgXcQ', env);
+    assert.equal(v.title, 'A Video');
+    assert.equal(v.creator, 'Some Channel');
+    assert.equal(v.sourceId, 'video:dQw4w9WgXcQ');
+    assert.ok(calls.some((c) => c.includes('key=books-only')), 'tried the Books key first');
+    const [c] = await search('video', 'https://www.youtube.com/@veritasium', {});
+    assert.equal(c.title, 'Veritasium');
+    assert.equal(c.sourceId, 'channel:UCHnyfMqiRRG1u-2MsSQLbXA');
+    assert.equal(c.details.kind, 'Channel');
+    assert.equal(c.cover, 'https://yt3.example/avatar.jpg');
+    assert.equal(c.description, 'An element of truth & more');
+    await assert.rejects(search('video', 'cats', env), /YouTube Data API v3/);
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test('page layouts: shelf order and hidden status shelves per media page; collections can be shown nowhere', async () => {
+  const { saveLayout, getLayouts, cleanLayout, cleanCollections } = await import('../server/settings.js');
+  const { showsOnHome, showsOnType } = await import('../src/lib/sorting.js');
+  const env = fakeEnv();
+  const saved = await saveLayout(env, 'book', { order: ['c:favorites', 's:finished', 's:bogus', 'x:1', 'c:favorites'], hidden: ['abandoned', 'nope'] });
+  assert.deepEqual(saved, { order: ['c:favorites', 's:finished'], hidden: ['abandoned'] });
+  assert.deepEqual((await getLayouts(env)).book, saved);
+  await assert.rejects(saveLayout(env, 'home', { order: [] }), /Which page/);
+  assert.deepEqual(cleanLayout({}), { order: [], hidden: [] });
+  const [c] = cleanCollections([{ name: 'Old', show: 'none' }]);
+  assert.equal(c.show, 'none');
+  assert.equal(showsOnHome(c), false);
+  assert.equal(showsOnType(c), false);
+});
+
+test('add to my shelf: a friend’s item becomes an editor link with its details and database id', async () => {
+  const { addItemHref, shelfHtml } = await import('../src/scripts/friends-ui.js');
+  const { TYPES } = await import('../src/lib/types.js');
+  const item = { uid: 'u1', title: 'Wingspan & Friends', type: 'boardgame', creator: 'Elizabeth Hargrave', year: '2019', cover: 'https://bea.example/img/w.jpg', source: { name: 'BoardGameGeek', id: '266192', url: 'https://boardgamegeek.com/boardgame/266192' }, comments: [] };
+  const href = addItemHref(item);
+  assert.ok(href.startsWith('/admin/#add-item='));
+  const ref = JSON.parse(decodeURIComponent(href.slice('/admin/#add-item='.length)));
+  assert.deepEqual(ref, { title: 'Wingspan & Friends', type: 'boardgame', creator: 'Elizabeth Hargrave', year: '2019', cover: 'https://bea.example/img/w.jpg', source: item.source });
+  // Signed in on a friend's shelf: offered unless you already have it.
+  const friend = { id: 'f1', url: 'https://bea.example' };
+  assert.match(shelfHtml({ friend, items: [item] }, TYPES, { me: 'https://me.example' }), /Add to my shelf/);
+  assert.doesNotMatch(shelfHtml({ friend, items: [{ ...item, youHave: true }] }, TYPES, { me: 'https://me.example' }), /Add to my shelf/);
+  assert.doesNotMatch(shelfHtml({ friend: { url: friend.url }, items: [item] }, TYPES, {}), /Add to my shelf/); // visitors
+});

@@ -2,6 +2,42 @@
 
 The version number lives in `package.json` and shows in **Manage → Settings → Updates**. Bump it with each release.
 
+## 0.5.4 (Nov 2026)
+
+- **Size slider.** Collection pages, media pages and "see all" pages have a **Size** slider between Sort and Filters. Slide it to make the items smaller (more per row) or bigger. Rows re-pack to fit. It's remembered in your browser; **Reset** puts it back.
+
+## 0.5.3 (Nov 2026)
+
+- **Add a friend's item to your shelf.** On the Friends page, signed in, each entry in *What Your Friends Are Up To* has a **＋** button, and items on a friend's shelf have **Add to my shelf**. It opens your editor already filled in (title, creator, year, cover, and the same database link they used, so it shows as "You have this" for both of you). Pick a status, write your notes, save. Things you already have don't show the button.
+- A recommendation's **Add it** now opens the editor filled in too, instead of a search.
+- The phone bubble menu has a thin divider between the media pages and Friends / Journal / Manage.
+- **＋ next to each media page's title.** Signed in, a ＋ sits between the title and the copy-link icon on Books, Movies, Board Games and the rest. It opens Manage → Add with that kind of media already picked. On media pages, **Edit shelves** is now a small pencil after the copy-link icon.
+
+## 0.5.2 (Nov 2026)
+
+- **One open item per row.** On pages where a shelf wraps onto several rows (every collection page and every "see all" page, for all media), each row now has its own front-facing item, and each row slides on its own. Turning something on one row no longer flips back the item on the row above. Rows also leave room for their open item, so they slide less.
+- **Sort on every shelf page.** Collection pages, media pages and "see all" pages have a **Sort** menu at the top of the filter bar: Shelf order, Newest, Oldest, Title, Creator, Highest rated, or Release year. It's in the address bar too, so a sorted view can be shared. The **Shelf effects** switch lives next to it (and still in the footer).
+- **Bubble menu is just the menu again.** The Shelf effects and Light mode switches are gone from it. Light mode is in the footer and in **Manage → Settings → Look** ("Light mode on this browser").
+- Turning Shelf effects on or off now redraws the page, so it takes effect right away.
+
+## 0.5.1 (Nov 2026)
+
+- **YouTube without a new key.** Pasting a channel link now works with no key at all (video links already did). Searching YouTube by name uses your existing Google Books key once **YouTube Data API v3** is switched on in that Google Cloud project (one click); `YOUTUBE_API_KEY` is only needed to use a separate key. The "Missing keys" note no longer mentions YouTube.
+- **Edit shelves right on the page.** Signed in, the Shelves page and every media page have an **Edit shelves** button. Drag whole shelves into a new order (or use ↑ ↓), take a shelf off the page (✕; nothing is deleted), and **＋ Add a shelf**: put back one you took off, add a starter shelf, or make a new empty one. Press **Save shelves** and the page shows it. Media pages keep their own order (Books can differ from Movies); collections still appear on every media page, so adding or removing one there changes them all. Collections can now also be shown **Nowhere**, kept but hidden (Manage → Collections → Show on).
+- Fixed: the "paste a link" box (YouTube, Spotify, BoardGameGeek) was too narrow to see the link. The YouTube search box now says "Search YouTube…".
+
+## 0.5.0 (Nov 2026)
+
+- **YouTube.** A new media type for videos and channels. Search needs a free YouTube key (`YOUTUBE_API_KEY`); without one, paste a video link under the search. Videos stand on the shelf as cute little grey computers (rounded case, chunky stand, a tiny light in your accent colour) and play right on their item page; channels get a square one with their avatar. Existing sites get YouTube turned on; switch it off in Settings if you don't want it.
+- **Journal search, sort and filters.** Search titles, creators and notes, filter by type and status, and sort by **Last edited** (the default), date, rating or title. Notes now remember when they were last changed.
+- **@mention friends.** Type `@` in your notes or in a comment and pick a friend (typing `@name` by hand works too). It becomes a link to their MyShelf, and they get a note in their inbox. Friends need this version to receive mention notes.
+- **Recommend from anywhere.** A **Recommend to a friend** button on your item pages (when you're signed in), a paper plane on each item in a shelf's arrange dialog, and **Recommend** on friends' shelves and the Friends feed to pass something along to another friend (they're credited: "from Dillon's shelf").
+- **Friends' takes before you add.** Search results and the editor show which friends already have something, with their rating and notes.
+- **Light mode and accent colours.** Manage → Settings → **Look** sets your site to light or dark and picks the accent colour (eight presets or any colour). Visitors can still flip light/dark for themselves.
+- **Display switches moved.** **Shelf effects** and **Light mode** switches are now at the bottom of every page and at the bottom of the phone bubble menu (no longer in Settings).
+- Fixed: the phone bubble menu button was hard to see on light pages (item pages, journal cards). It's now solid enough to read anywhere.
+- Fixed: the "Missing keys" note in Manage no longer lists keys for media types you've turned off (no BGG nag without board games).
+
 ## 0.4.1 (Nov 2026)
 
 - **Bigger home page shelves.** Each collection on the home page now shows up to 24 items (was 12). A collection with more than that ends with a **+N more** card that opens the full collection, so nothing goes missing without a sign.
