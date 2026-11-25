@@ -2,6 +2,47 @@
 
 The version number lives in `package.json` and shows in **Manage → Settings → Updates**. Bump it with each release.
 
+## 0.7.1 (Nov 2026)
+
+- **The Recently Finished ✕ moved into the shelf's edit screen.** It's no longer on the covers. Open the shelf's ✎ (Arrange), press the red ✕ on anything you want off it (↺ keeps it), then **Save changes**. Its finished date moves back past the shelf's time window, as before.
+
+## 0.7.0 (Nov 2026)
+
+- **Tidier editor.** The add/edit form only shows fields that fit the media and status: no rating or start date on *Want to*, a finished date only on *Finished*, **Lent to** and **Lent since** only once you tick **I own a copy**, and no "own a copy" for YouTube. Hidden fields aren't saved, so nothing stale is left behind.
+- **Progress bars.** Books (page X of Y), TV shows (episode X of Y) and legacy or campaign board games (X of Y games, chapters, months, scenarios or missions) show a **Progress** box while you're in the middle of them. The total fills in from the page or episode count. Board games ticked **Legacy or campaign game** (BGG's *Legacy Game* mechanic ticks it for you) get campaign progress. The progress shows as a thin bar along the bottom of the cover on your shelves, and as a bar with "Page 212 of 412 · 51%" on the item page.
+- **✕ on Recently Finished.** Signed in, the cover facing out on a Recently Finished shelf (any automatic *Finished* collection with a time window) has a ✕. It moves the finished date to just past the shelf's window (a year and a day ago on the starter shelf), so the item drops off. **Undo** puts the old date back.
+- Fixed: **Refresh from BGG** showed in the editor for things that aren't board games.
+- Fixed: dates filled in for you (Started, Finished, Lent since, Date added, the ✕ above, backup file names) used UTC, so in the evening across the Americas they came out a day late. They now use your own time zone.
+
+## 0.6.0 (Nov 2026)
+
+- **API keys in Settings.** Paste your TMDB, Twitch (IGDB), BoardGameGeek, Spotify, Google Books, YouTube and GitHub keys (and contact email) in **Manage → Settings → API keys**. No more Cloudflare dashboard. Each service has a **Test** button, and saving runs the test for you. Keys are stored encrypted (the encryption key is made automatically and kept in your KV storage, so a database copy alone doesn't give them away). The page only ever shows their last four characters. They're never shared with friends or put in backups.
+- **Worker secrets still work.** If a key is saved in Settings it's used first; otherwise the Worker secret with the same name is. **Remove** goes back to the secret. Existing sites don't need to change anything.
+- The **Missing keys** note in the Manage header is now a link to Settings → API keys, and error messages about missing keys point there too.
+
+## 0.5.9 (Nov 2026)
+
+- **＋ on the Journal.** Signed in, a ＋ sits next to the Journal's title. It opens **Manage → Add**.
+
+## 0.5.8 (Nov 2026)
+
+- **Hidden shelves stay in Edit shelves.** On a media page, a shelf you hide (a status shelf like *Reading* or *Read*, or a collection) stays in the editor's list, dimmed and marked "Hidden on this page", with a **Show** button to bring it back. The ✕ is now a **Hide** button. All four status shelves are always listed, even empty ones, so you can arrange or hide them before anything's on them.
+
+## 0.5.7 (Nov 2026)
+
+- **YouTube plaques get a nameplate.** Under the picture, a small engraved platinum plate shows the video's or channel's title (up to two lines).
+
+## 0.5.6 (Nov 2026)
+
+- **Each media page has its own shelves.** In **Edit shelves** (the ✎ by a media page's title), ✕ on a collection now hides it on that page only; the other media pages keep it. Hidden collections are listed under **＋ Add a shelf → Put back or add** ("Hidden on this page"). A collection that wasn't on any media page, or a new shelf you make there, shows up on that page only, and you can put it on others the same way.
+
+## 0.5.5 (Nov 2026)
+
+- **Fix: the ＋ by a media page's title** said "That collection was not found" instead of opening Manage → Add. The pencil next to it (Edit shelves) was caught by the same mix-up and works again too.
+- **Media page titles** now go Title → ✎ Edit shelves → ＋ Add → copy link.
+- **Bubble menu** ends Journal → Friends → Manage.
+- **YouTube items are award plaques** instead of little monitors: a black framed board with a platinum play emblem on top and the video's picture (or the channel's, square) below it.
+
 ## 0.5.4 (Nov 2026)
 
 - **Size slider.** Collection pages, media pages and "see all" pages have a **Size** slider between Sort and Filters. Slide it to make the items smaller (more per row) or bigger. Rows re-pack to fit. It's remembered in your browser; **Reset** puts it back.

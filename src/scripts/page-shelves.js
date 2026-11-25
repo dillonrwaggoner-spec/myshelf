@@ -4,15 +4,21 @@
 //
 // Where it's stored:
 //   Shelves page: the collections' own order and their "show on" setting (the same as Manage → Collections).
-//   Media pages:  a per-type layout (order + hidden status shelves); collections there use "show on" too, and since
-//                 collections appear on every media page, adding or removing one changes them all.
+//   Media pages:  a per-type layout (order + hidden shelves). Taking a collection off a media page hides it on that
+//                 page only. One that wasn't on any media page (or a new one) is turned on for media pages and
+//                 starts out on this page only (hidden on the others, where it can be put back).
 import Sortable from 'sortablejs';
-import { STARTER_SHELVES } from '../lib/sorting.js';
+import { STARTER_SHELVES, hiddenAfterEdit, showsOnType } from '../lib/sorting.js';
+import { TYPE_KEYS } from '../lib/types.js';
 
 const tools = document.querySelector('[data-shelves-page]');
 const bookcase = document.querySelector('.bookcase');
 const token = (() => { try { return localStorage.getItem('myshelf_token') || ''; } catch { return ''; } })();
 if (tools && bookcase && token) init();
+// Pages with just the ＋ (the Journal): show it once the sign-in checks out.
+else if (token && document.querySelector('.pshelf-reveal')) {
+  api('ping').then(() => document.querySelectorAll('.pshelf-reveal').forEach((el) => (el.hidden = false))).catch(() => {});
+}
 
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(`/api/${path}`, {
@@ -51,7 +57,7 @@ function init() {
     if (id.startsWith('new:')) return 'New shelf · starts empty';
     if (id.startsWith('starter:')) return 'Starter shelf · fills itself';
     if (id.startsWith('s:')) return 'Fills itself by status';
-    return sec.dataset.shelfKind === 'auto' ? 'Fills itself' : home ? 'Your collection' : 'Your collection · on every media page';
+    return sec.dataset.shelfKind === 'auto' ? 'Fills itself' : 'Your collection';
   }
 
   function decorate(sec) {
@@ -64,7 +70,7 @@ function init() {
         <span class="pshelf-btns">
           <button type="button" class="pshelf-btn" data-move="-1" aria-label="Move ${esc(title)} up" title="Move up">↑</button>
           <button type="button" class="pshelf-btn" data-move="1" aria-label="Move ${esc(title)} down" title="Move down">↓</button>
-          <button type="button" class="pshelf-btn pshelf-remove" data-remove aria-label="Take ${esc(title)} off this page" title="Take it off this page">✕</button>
+          <button type="button" class="pshelf-btn pshelf-remove" data-remove aria-label="Hide ${esc(title)} on this page" title="Hide it on this page">Hide</button>
         </span>
       </div>`);
   }
@@ -76,12 +82,13 @@ function init() {
     sections().forEach((sec) => {
       if (sec.classList.contains('shelf-edit-only')) sec.hidden = false;
       decorate(sec);
+      if (sec.hasAttribute('data-off-page')) setOff(sec, true); // hidden on this page: listed, dimmed, with Show
     });
     bookcase.querySelectorAll(':scope > .shelf-section:not([data-shelf-id])').forEach((s) => s.classList.add('pshelf-ignore'));
     bar = document.createElement('div');
     bar.className = 'pshelf-actions';
     bar.innerHTML = `
-      <p class="pshelf-hint">Drag shelves by the <span aria-hidden="true">⠿</span> handle (or use ↑ ↓). ✕ takes a shelf off this page; it isn't deleted${home ? '' : ', and collections come off every media page'}.</p>
+      <p class="pshelf-hint">Drag shelves by the <span aria-hidden="true">⠿</span> handle (or use ↑ ↓). <strong>Hide</strong> takes a shelf off this page without deleting it${home ? '' : ' (other media pages keep it)'}. Hidden shelves stay in this list, dimmed: press <strong>Show</strong> to bring one back.</p>
       <div class="pshelf-add-wrap">
         <button type="button" class="pshelf-cta ghost" data-add-open aria-expanded="false">＋ Add a shelf</button>
         <div class="pshelf-add" hidden>
@@ -166,12 +173,19 @@ function init() {
         sec.remove();
         return;
       }
-      const off = sec.classList.toggle('pshelf-removed');
-      rm.textContent = off ? '↺' : '✕';
-      rm.title = off ? 'Keep it on this page' : 'Take it off this page';
-      rm.setAttribute('aria-label', `${off ? 'Keep' : 'Take'} ${sec.dataset.shelfTitle} ${off ? 'on' : 'off'} this page`);
+      setOff(sec, !sec.classList.contains('pshelf-removed'));
     }
   });
+
+  // Hidden (dimmed, "Show" brings it back) or shown ("Hide").
+  function setOff(sec, off) {
+    sec.classList.toggle('pshelf-removed', off);
+    const rm = sec.querySelector(':scope > .pshelf-bar [data-remove]');
+    if (!rm) return;
+    rm.textContent = off ? 'Show' : 'Hide';
+    rm.title = off ? 'Show it on this page' : 'Hide it on this page';
+    rm.setAttribute('aria-label', `${off ? 'Show' : 'Hide'} ${sec.dataset.shelfTitle} on this page`);
+  }
 
   tools.querySelector('.pshelf-start').addEventListener('click', start);
 
@@ -200,6 +214,7 @@ function init() {
       const isNew = (id) => id.startsWith('new:') || id.startsWith('starter:');
       const freshOf = (id) => ({ ...(starterOf(id) || blank(titles[id])), show: home ? 'shelves' : 'type' });
       let next;
+      const turnedOn = [];
       if (home) {
         // The Shelves page shows collections in the collections' own order: kept shelves first, in the new order,
         // then everything else as it was.
@@ -216,9 +231,10 @@ function init() {
           next.push(removed.includes(`c:${c.slug}`) ? { ...c, show: showFor(c.show, false) } : c);
         }
       } else {
+        // Removing a collection here only hides it on this page (below). Putting one here that wasn't on any
+        // media page turns it on for media pages.
         next = collections.map((c) => {
-          if (removed.includes(`c:${c.slug}`)) return { ...c, show: showFor(c.show, false) };
-          if (kept.includes(`c:${c.slug}`)) return { ...c, show: showFor(c.show, true) };
+          if (kept.includes(`c:${c.slug}`) && !showsOnType(c)) { turnedOn.push(c.slug); return { ...c, show: showFor(c.show, true) }; }
           return c;
         });
         for (const id of kept.filter(isNew)) next.push(freshOf(id));
@@ -231,9 +247,11 @@ function init() {
         let k = 0;
         const order = kept.map((id) => (isNew(id) ? `c:${created[k++]?.slug || ''}` : id)).filter((id) => id !== 'c:');
         const { layouts } = await api('layouts');
-        const hiddenBefore = layouts[page]?.hidden || [];
-        const hidden = [...new Set([...hiddenBefore.filter((st) => !kept.includes(`s:${st}`)), ...removed.filter((id) => id.startsWith('s:')).map((id) => id.slice(2))])];
-        await api('layouts', { method: 'POST', body: { page, order, hidden } });
+        const hidden = hiddenAfterEdit({ page, pages: TYPE_KEYS, kept, removed, layouts, turnedOn: [...turnedOn, ...created.map((c) => c.slug)] });
+        await api('layouts', { method: 'POST', body: { page, order, hidden: hidden[page] } });
+        for (const p of Object.keys(hidden)) {
+          if (p !== page) await api('layouts', { method: 'POST', body: { page: p, order: layouts[p]?.order || [], hidden: hidden[p] } });
+        }
       }
       btn.textContent = 'Saved';
       location.reload();
