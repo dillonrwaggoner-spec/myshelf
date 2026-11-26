@@ -2,6 +2,64 @@
 
 The version number lives in `package.json` and shows in **Manage → Settings → Updates**. Bump it with each release.
 
+## 0.9.6 (Nov 2026)
+
+- **Fixed: blank pages and "This promise was created by a request that has since ended" when signing in.** When a site starts up, it makes sure its database is up to date. If the first visitor left while that was still running, every later visit to that copy of the site could fail until Cloudflare restarted it: blank pages, and that error on the Manage sign-in. Each visit now checks for itself, so one visitor leaving can't break the site for the rest.
+
+## 0.9.5 (Nov 2026)
+
+- **YouTube pages on phones.** A video's page kept the player and the text side by side on phones, squeezing the title and your notes into a narrow column. On phones the player now sits full width above the title, like covers on other pages.
+- **YouTube plaques look right on phones.** The plaque now has a thin brushed-platinum frame, so it stands out on the dark shelves instead of blending in, and the nameplate's title stays readable at phone sizes. Edge-on, it shows the platinum edge with the title.
+- **Shelf decorations: Lock and Undo.** The preview starts **locked**, so nothing moves if you touch or drag it by accident (and on a phone you can scroll past it). Click **Locked** to unlock it and drag, then lock it again. **Undo** (or Ctrl/⌘+Z) steps back through your last changes: moves, sizes, frames and order. Adding a decoration unlocks the preview so you can place it.
+- **Progress bars: everyone, or only you.** New in Settings → Your site → *Progress bars*. **Everyone** (the default, as before) shows them to all visitors. **Only me** shows them only in a browser signed in to Manage. (They're hidden from visitors, not removed from the page.)
+- **Updates come first in Settings.** Which version you're running, and the Update button when a new one is out, are now at the top of Manage → Settings.
+- **New copies fill in their own GitHub address.** The Source code link (which Updates use to find your copy) is now filled in with the repository your site was built from, your own fork. Copies still pointing at the original project switch to their own fork automatically. A link you typed yourself stays.
+- **Fixed: collections hidden on a media page came back when you used the filters.** They now stay hidden.
+
+## 0.9.4 (Nov 2026)
+
+- **Fixed: swiping and other shelf features stopped working after an update.** Pages kept by 0.9.2's page cache could outlive an update and point to script files the update had replaced, so the shelves' scripts (swiping, turning covers, editing shelves) didn't load. Kept pages now belong to the version that made them, and an update starts fresh.
+
+## 0.9.3 (Nov 2026)
+
+- **Link previews (share cards).** Sharing a link to your MyShelf in iMessage, Slack, Discord, Facebook or X now shows a proper preview. Your pages show a card drawn from your site's name, your name, your tagline, your colours and a shelf of your latest covers. Manage draws it in the background and redraws it whenever any of those change. An item's page shows its cover, title and description. Until Manage has drawn your card, a generic MyShelf card is used. Page titles now include your name too (*MyShelf | Your name*).
+- **Open Library links bring their cover.** A pasted link with an edition picked (…`?edition=`…) now uses that edition's cover. If the book has no cover of its own, the cover comes from one of its editions, or failing that from Google Books.
+- **Tidier Collections page.** Each collection is now a card: name and kind of shelf on top, then the description, then *Show on*, *Sort* and *Keep* side by side (stacked on phones). Checkboxes on dark sites no longer look ticked when they aren't.
+- **Library pages.** Manage → Library shows 25 items at a time, with page buttons underneath. Searching or picking a type starts again from page 1.
+- **Branch previews build again.** `wrangler.jsonc` has an (intentionally empty) `previews` block, so Cloudflare's builds for pull requests stop failing. Previews get no database, so they can't touch your real shelf.
+
+## 0.9.2 (Nov 2026)
+
+- **Fixed: "Error 1102: Worker exceeded resource limits."** Building a page with a big library takes more computing time than Cloudflare's free plan allows each visit, so busy moments failed with Error 1102. Finished pages are now kept and reused, so most visits don't build anything. Every change you make clears them, so pages are never out of date, and they're rebuilt every few hours anyway.
+- **Making the shelf copies of covers is much lighter.** In 0.9.1 the Manage page sent each copy in a form that took too long for the Worker to unpack, which could trip the same error. Copies that failed get made the next time Manage is open.
+- **Friendlier book search error.** When book search can't get an answer, it now says *"Open Library is busy, try again in a few moments"* instead of a bare error code (Open Library's search fails now and then even while its website works). Without a Google Books key it also suggests adding one, as a backup.
+- **Paste an Open Library link for books.** Like the BoardGameGeek box for board games: under the book search, paste a link to a book on openlibrary.org (a work, an edition, or an ISBN page) and it comes up straight away, with that edition's cover, page count and ISBN when you paste an edition link. Handy when search can't find the right book, or when Open Library's search is busy.
+- **"Missing keys" mentions Google Books (optional).** It's free, and it keeps book search working when Open Library is down.
+
+## 0.9.1 (Nov 2026)
+
+- **Fixed: iPhones crashing on the shelves.** On iPhone (Safari, DuckDuckGo and every other iPhone browser) the Shelves page could crash with *"A problem repeatedly occurred"*. The shelves were loading every cover at full size, which is more memory than iPhones allow a page. They now use small copies of the covers, and look the same. Item pages still show the full-size cover.
+- **After updating, open Manage once on a computer** and leave it open for a minute or two. It makes the small copies for the covers you already have, in the background. Until an item has its copies, its spine shows a plain colour. New covers get their copies the next time Manage is open.
+- Shelves far down the page are now drawn when you scroll near them, so long pages load faster.
+
+## 0.9.0 (Nov 2026)
+
+- **Choose which decoration is in front.** In **Settings → Shelf decorations**, drag the ⠿ handle (or use ↑ ↓) to reorder them. Where they overlap, the top of the list stands in front, and each one is labelled *In front*, *Middle* or *At the back*. Heads-up: until now the *last* one stood in front, so if yours overlap, check the order once.
+- **Update banner in Manage.** When a newer MyShelf is out, a banner at the top of Manage says so. **What's new** shows the changelog for everything since your version, and **Update** jumps to Settings → Updates. Hide it with ✕ and it comes back for the next version.
+- **Announcements.** The MyShelf project can post short notes to everyone running MyShelf, shown in the same place (for example, "an important fix is out, please update"). Each can be dismissed.
+- **Changelog links.** **Settings → Updates** shows what's in the version you're on, with a link to the full changelog.
+
+## 0.8.0 (Nov 2026)
+
+- **Your name in the top bar.** The home link at the top now reads *MyShelf | Your name*. The big heading on the Shelves page says **Featured Shelves** instead of repeating it. Change the heading in **Manage → Settings → Shelves page heading**.
+- **"Update available."** When a newer MyShelf is out, a small pill appears next to your name in the top bar. Only you see it, in a browser where you're signed in to Manage. It opens **Settings → Updates**. The check needs no GitHub token: it reads the version number from the original project on GitHub every few hours, so it works for every copy.
+- Manage now shows your site's name in the top bar too (it used to say MyShelf there).
+
+## 0.7.2 (Nov 2026)
+
+- **Simpler setup guide.** The README is now a numbered walkthrough with direct links to every page you need: forking, Cloudflare's import and Worker settings, GitHub's token page, and each API key's sign-up page (TMDB, Twitch, BoardGameGeek, Spotify, Google). Setting your admin password and making a GitHub token are now main steps instead of extras. The developer details are tucked away at the bottom.
+- **GitHub token first in Settings → API keys**, marked *recommended*, since it's what lets **Update now** work.
+
 ## 0.7.1 (Nov 2026)
 
 - **The Recently Finished ✕ moved into the shelf's edit screen.** It's no longer on the covers. Open the shelf's ✎ (Arrange), press the red ✕ on anything you want off it (↺ keeps it), then **Save changes**. Its finished date moves back past the shelf's time window, as before.

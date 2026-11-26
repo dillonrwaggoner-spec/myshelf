@@ -3,6 +3,7 @@
 // something in Phone view, then they keep their own placement. Every change saves by itself.
 import { esc, token } from './friends-ui.js';
 import { phoneOf } from '../lib/decor.js';
+import Sortable from 'sortablejs';
 
 const $ = (s, root = document) => root.querySelector(s);
 const FRAMES = [['none', 'None'], ['wood', 'Wood'], ['black', 'Black'], ['gold', 'Gold'], ['white', 'White']];
@@ -15,6 +16,32 @@ const FIELDS = {
   turn: { min: -50, max: 50, step: 1, unit: '°', label: 'Turn', hint: 'angle it on the shelf: minus faces left, plus faces right' },
 };
 let decor = [];
+
+// ───────── lock + undo ─────────
+// Locked (the default): the preview ignores drags and arrow keys, so nothing moves by accident (and phones can
+// scroll past it). Remembered in this browser. Undo steps back through saved changes, up to 30.
+let locked = true;
+try { locked = localStorage.getItem('myshelf_decor_unlocked') !== '1'; } catch {}
+const undoStack = [];
+let lastSaved = null;
+let undoing = false;
+const snap = (list) => JSON.stringify(list);
+function showTools() {
+  const lock = $('#decor-lock');
+  lock.textContent = locked ? '🔒 Locked' : '🔓 Unlocked: drag to move';
+  lock.setAttribute('aria-pressed', String(locked));
+  lock.classList.toggle('on', !locked);
+  $('#decor-undo').disabled = !undoStack.length;
+}
+function remember(savedList) {
+  const s = snap(savedList);
+  if (!undoing && lastSaved != null && s !== lastSaved) {
+    undoStack.push(lastSaved);
+    if (undoStack.length > 30) undoStack.shift();
+  }
+  lastSaved = s;
+  showTools();
+}
 
 async function call(method, body, raw = false) {
   const res = await fetch('/api/decor', {
@@ -71,7 +98,7 @@ function renderStage(focus = null) {
   pending = true;
   requestAnimationFrame(() => {
     pending = false;
-    frame.contentWindow?.postMessage({ type: 'myshelf:decor', decor, focus: focusAfter }, location.origin);
+    frame.contentWindow?.postMessage({ type: 'myshelf:decor', decor, focus: focusAfter, locked }, location.origin);
     focusAfter = null;
   });
 }
@@ -85,6 +112,8 @@ window.addEventListener('message', (e) => {
   } else if (m.type === 'myshelf:decor-size') {
     frameHeight = Math.max(80, m.height || 0);
     scalePreview();
+  } else if (locked && (m.type === 'myshelf:decor-move' || m.type === 'myshelf:decor-nudge')) {
+    // locked: ignore (the preview shouldn't send these, but just in case)
   } else if (m.type === 'myshelf:decor-move' && decor[m.i]) {
     if (m.done) return save();
     setField(m.i, 'x', m.x);
@@ -140,7 +169,12 @@ function render() {
     const p = placement(d);
     return `
     <li class="decor-row${phone && p.hidden ? ' is-hidden' : ''}" data-i="${i}">
-      <img class="decor-thumb" src="${esc(d.image)}" alt="Decoration ${i + 1}">
+      <div class="decor-side">
+        <span class="decor-handle" title="Drag to change which one is in front" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></span>
+        <img class="decor-thumb" src="${esc(d.image)}" alt="Decoration ${i + 1}">
+        ${decor.length > 1 ? `<span class="decor-layer muted small">${i === 0 ? 'In front' : i === decor.length - 1 ? 'At the back' : 'Middle'}</span>` : ''}
+        ${decor.length > 1 ? `<span class="decor-move"><button type="button" class="btn ghost small" data-decor-up="${i}" aria-label="Move forward"${i === 0 ? ' disabled' : ''}>↑</button><button type="button" class="btn ghost small" data-decor-down="${i}" aria-label="Move back"${i === decor.length - 1 ? ' disabled' : ''}>↓</button></span>` : ''}
+      </div>
       <div class="decor-controls">
         ${phone ? `<p class="decor-phone-note muted small">${phoneNote(d, i)}</p>` : ''}
         ${fieldHtml('x', p)}${fieldHtml('y', p)}${fieldHtml('height', p)}${fieldHtml('tilt', p)}${fieldHtml('turn', p)}
@@ -175,6 +209,7 @@ async function save(okText = 'Saved. Your Shelves page shows it right away.') {
       && (!d.phone || (sameNumbers(d.phone, decor[i].phone) && d.phone.hidden === decor[i].phone.hidden)));
     decor = saved;
     if (!same) render();
+    remember(saved);
     msg(okText);
   } catch (err) {
     msg(err.message, true);
@@ -182,7 +217,13 @@ async function save(okText = 'Saved. Your Shelves page shows it right away.') {
 }
 
 async function load() {
-  try { decor = await call('GET'); render(); } catch (err) { msg(err.message, true); }
+  try {
+    decor = await call('GET');
+    undoStack.length = 0;
+    lastSaved = snap(decor);
+    render();
+    showTools();
+  } catch (err) { msg(err.message, true); }
 }
 
 function setField(i, k, v, focus = null) {
@@ -213,7 +254,25 @@ $('#decor-list').addEventListener('change', (e) => {
   if (k === 'showOnPhone') e.target.closest('.decor-row').classList.toggle('is-hidden', !e.target.checked);
   save();
 });
+// ───────── layering: the top of the list stands in front ─────────
+function moveDecor(from, to) {
+  if (to < 0 || to >= decor.length || from === to) return;
+  const [d] = decor.splice(from, 1);
+  decor.splice(to, 0, d);
+  render();
+  save(to === 0 ? 'Moved to the front.' : to === decor.length - 1 ? 'Moved to the back.' : 'Moved.');
+}
+Sortable.create($('#decor-list'), {
+  handle: '.decor-handle',
+  animation: 160,
+  onEnd: (e) => { if (e.oldIndex !== e.newIndex) { const { oldIndex, newIndex } = e; render(); moveDecor(oldIndex, newIndex); } },
+});
+
 $('#decor-list').addEventListener('click', (e) => {
+  const up = e.target.closest('[data-decor-up]');
+  if (up) return moveDecor(Number(up.dataset.decorUp), Number(up.dataset.decorUp) - 1);
+  const down = e.target.closest('[data-decor-down]');
+  if (down) return moveDecor(Number(down.dataset.decorDown), Number(down.dataset.decorDown) + 1);
   const follow = e.target.closest('[data-decor-follow]');
   if (follow) {
     const i = Number(follow.dataset.decorFollow);
@@ -249,9 +308,11 @@ $('#decor-file').addEventListener('change', async (e) => {
   msg('Uploading…');
   try {
     decor = await call('POST', file, true);
+    remember(decor);
+    if (locked) { locked = false; try { localStorage.setItem('myshelf_decor_unlocked', '1'); } catch {} showTools(); renderStage(); }
     msg(file.type === 'image/jpeg'
-      ? 'Added in a wood frame, angled a little (a JPG can’t be see-through). Drag it into place, and change the frame and turn below.'
-      : 'Added. Drag it into place in the preview, or set exact numbers below.');
+      ? 'Added in a wood frame, angled a little (a JPG can’t be see-through). The preview is unlocked: drag it into place, and change the frame and turn below.'
+      : 'Added, and the preview is unlocked: drag it into place, or set exact numbers below.');
   } catch (err) {
     msg(err.message, true);
   }
@@ -260,3 +321,31 @@ $('#decor-file').addEventListener('change', async (e) => {
 
 document.addEventListener('myshelf:ready', load);
 document.addEventListener('myshelf:tab', (e) => { if (e.detail === 'settings') load(); });
+
+$('#decor-lock').addEventListener('click', () => {
+  locked = !locked;
+  try { locked ? localStorage.removeItem('myshelf_decor_unlocked') : localStorage.setItem('myshelf_decor_unlocked', '1'); } catch {}
+  showTools();
+  renderStage();
+  msg(locked ? 'Locked: the preview won’t move anything.' : 'Unlocked: drag the decorations in the preview.');
+});
+// Undo: back to the layout before the last saved change. A removed decoration's picture is deleted when it's
+// removed, so undo can't bring that one back (removing asks first).
+async function undo() {
+  if (!undoStack.length) return;
+  const have = new Set(decor.map((d) => d.image));
+  decor = JSON.parse(undoStack.pop()).filter((d) => have.has(d.image));
+  undoing = true;
+  render();
+  renderStage();
+  try { await save('Undone.'); } finally { undoing = false; showTools(); }
+}
+$('#decor-undo').addEventListener('click', undo);
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return;
+  if (e.target.closest?.('input[type="text"], input:not([type]), textarea, [contenteditable]')) return; // let text fields undo their own typing
+  if (!$('#decor-list')?.offsetParent) return; // only while Settings is showing
+  e.preventDefault();
+  undo();
+});
+showTools();

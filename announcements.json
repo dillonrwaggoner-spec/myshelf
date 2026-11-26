@@ -1,0 +1,12 @@
+{
+  "announcements": [
+    {
+      "id": "2026-11-promise-fix",
+      "message": "Important fix: MyShelf 0.9.6 fixes blank pages and a \"promise was created by a request that has since ended\" error when signing in. Please update.",
+      "link": "https://github.com/lexjudex/myshelf/blob/main/CHANGELOG.md",
+      "linkText": "What's new",
+      "until": "2027-01-31",
+      "below": "0.9.6"
+    }
+  ]
+}

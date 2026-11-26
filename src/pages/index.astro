@@ -34,15 +34,15 @@ const addable = decorPreview ? [] : [
   {decorPreview && <script is:inline>document.documentElement.classList.add('decor-preview');</script>}
   <section class="hero">
     {!decorPreview && <ShelfEditor page="home" addable={addable} />}
-    <h1>{site.title}{site.owner && <span class="hero-owner"><span class="sep">|</span>{site.owner}</span>}<CopyLink label="Copy link to this shelf" /></h1>
+    <h1>{site.heading}<CopyLink label="Copy link to this shelf" /></h1>
     <p>{site.tagline}</p>
   </section>
 
   {/* Shelf decorations (Manage → Settings): up to three images standing on top of the bookcase. */}
   {(decor.length > 0 || decorPreview) && (
     <div class="bookcase-top" aria-hidden="true" style={decorMaxStyle(decor)}>
-      {decor.map((d) => (
-        <span class={decorClasses(d)} style={decorStyle(d)} set:html={decorInner(d, escAttr)} />
+      {decor.map((d, i) => (
+        <span class={decorClasses(d)} style={decorStyle(d, i, decor.length)} set:html={decorInner(d, escAttr)} />
       ))}
     </div>
   )}
@@ -90,9 +90,12 @@ const addable = decorPreview ? [] : [
     const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const tell = (msg) => window.parent.postMessage(msg, location.origin);
     let list = [];
+    let locked = true; // until Manage says otherwise: dragging does nothing while it's locked
     window.addEventListener('message', (e) => {
       if (e.origin !== location.origin || e.source !== window.parent || e.data?.type !== 'myshelf:decor') return;
       list = e.data.decor || [];
+      locked = e.data.locked === true;
+      top.classList.toggle('decor-locked', locked);
       top.setAttribute('style', decorMaxStyle(list));
       const els = [...top.querySelectorAll('.decor')];
       const same = els.length === list.length && els.every((el, i) => el.dataset.image === list[i].image);
@@ -101,12 +104,12 @@ const addable = decorPreview ? [] : [
         els.forEach((el, i) => {
           const nudge = el.style.getPropertyValue('--nudge');
           el.className = decorClasses(list[i]) + (el.classList.contains('dragging') ? ' dragging' : '');
-          el.setAttribute('style', decorStyle(list[i]));
+          el.setAttribute('style', decorStyle(list[i], i, list.length));
           if (nudge) el.style.setProperty('--nudge', nudge);
         });
       } else {
-        top.innerHTML = list.map((d, i) => `<span class="${decorClasses(d)}" style="${decorStyle(d)}" data-i="${i}" data-image="${esc(d.image)}" tabindex="0"
-          title="Drag to move · arrow keys nudge (Shift for bigger steps)">${decorInner(d, esc)}</span>`).join('');
+        top.innerHTML = list.map((d, i) => `<span class="${decorClasses(d)}" style="${decorStyle(d, i, list.length)}" data-i="${i}" data-image="${esc(d.image)}" tabindex="0"
+          title="Unlock in Manage, then drag to move · arrow keys nudge (Shift for bigger steps)">${decorInner(d, esc)}</span>`).join('');
       }
       if (e.data.focus != null) top.querySelector(`.decor[data-i="${e.data.focus}"]`)?.focus({ preventScroll: true });
       watchImages();
@@ -117,7 +120,7 @@ const addable = decorPreview ? [] : [
     let drag = null;
     top.addEventListener('pointerdown', (e) => {
       const el = e.target.closest('.decor[data-i]');
-      if (!el) return;
+      if (!el || locked) return;
       e.preventDefault();
       el.focus({ preventScroll: true });
       const r = el.getBoundingClientRect();
@@ -146,7 +149,7 @@ const addable = decorPreview ? [] : [
     top.addEventListener('pointercancel', end);
     top.addEventListener('keydown', (e) => {
       const el = e.target.closest('.decor[data-i]');
-      if (!el || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+      if (!el || locked || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
       e.preventDefault();
       const horizontal = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
       const sign = e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 1;

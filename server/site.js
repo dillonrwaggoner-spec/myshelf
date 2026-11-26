@@ -3,6 +3,7 @@
 import defaults from '../src/data/site.json' with { type: 'json' };
 import { getSetting, setSetting, hasDb } from './db.js';
 import { HttpError, TYPE_KEYS } from './util.js';
+import { REPO } from './version.js';
 
 const clean = (v, n) => String(v ?? '').trim().slice(0, n);
 
@@ -14,7 +15,11 @@ function withNewTypes(site) {
   const seen = Array.isArray(site.typesSeen) ? site.typesSeen : ORIGINAL_TYPES;
   return [...site.types, ...TYPE_KEYS.filter((t) => !seen.includes(t))];
 }
-const withTypes = (site) => ({ ...site, types: cleanTypes(withNewTypes(site)), theme: cleanTheme(site.theme) });
+// A new copy's Source link points at the repository it was built from (its own fork), not the original:
+// left at the original project's address (the default), it's filled in from the build. Anything else you typed stays.
+export const sourceOf = (source, repo = REPO) => (repo && (!source || source === defaults.source) ? `https://github.com/${repo}` : source);
+const cleanProgress = (v) => (v === 'owner' ? 'owner' : 'public');
+const withTypes = (site) => ({ ...site, progress: cleanProgress(site.progress), source: sourceOf(site.source), types: cleanTypes(withNewTypes(site)), theme: cleanTheme(site.theme) });
 
 // ───────── look: light or dark, and the accent colour ─────────
 export const DEFAULT_ACCENT = '#d99a4e';
@@ -65,6 +70,8 @@ export async function saveSite(env, input = {}) {
   }
   const site = {
     title: clean(input.title, 80) || defaults.title,
+    // The big heading on the Shelves page (your site's name and your name sit in the top bar).
+    heading: clean(input.heading, 80) || defaults.heading,
     tagline: clean(input.tagline, 200),
     owner: clean(input.owner, 80),
     // The address friends use to reach you. Leave blank to use whatever address you open the site on.
@@ -77,6 +84,9 @@ export async function saveSite(env, input = {}) {
     typesSeen: [...TYPE_KEYS],
     // Light or dark, and the accent colour. Visitors can still flip light/dark for themselves.
     theme: input.theme === undefined ? (await getSite(env)).theme : cleanTheme(input.theme),
+    // Progress bars (books, TV shows, legacy games): 'public' for everyone, or 'owner' = only in a browser
+    // signed in to Manage. (They're hidden from visitors, not removed from the page.)
+    progress: input.progress === undefined ? (await getSite(env)).progress : cleanProgress(input.progress),
   };
   await setSetting(env, 'site', site);
   return site;

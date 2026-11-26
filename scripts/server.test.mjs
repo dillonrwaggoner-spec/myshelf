@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildMarkdown, parseMarkdown, normalizeItem } from '../server/markdown.js';
-import { parseBggSearch, parseBggThings, search, details, igdbScore, rankBggHits, bggIdFromUrl, spotifyRefFromUrl } from '../server/providers.js';
+import { parseBggSearch, parseBggThings, search, details, igdbScore, rankBggHits, bggIdFromUrl, spotifyRefFromUrl, openLibraryRefFromUrl } from '../server/providers.js';
 import { isVinyl } from '../src/lib/types.js';
 import { inShelf, findStarter, STARTER_SHELVES } from '../src/lib/sorting.js';
 import { cleanCollections } from '../server/settings.js';
@@ -265,6 +265,63 @@ test('Books merge Open Library + Google Books even if one fails', async () => {
   assert.equal(res[0].cover, 'https://covers.openlibrary.org/b/id/123-L.jpg');
 });
 
+test('Book search: both sources failing says Open Library is busy (and suggests a Google Books key)', async () => {
+  mockFetch([
+    ['openlibrary.org/search.json', () => new Response('error code: 521', { status: 521 })],
+    ['googleapis.com/books', () => new Response('quota', { status: 429 })],
+  ]);
+  await assert.rejects(() => search('book', 'mycelium', {}), /Open Library is busy, try again in a few moments\. A free Google Books key/);
+  await assert.rejects(() => search('book', 'mycelium', { GOOGLE_BOOKS_KEY: 'k' }), (e) => e.message === 'Open Library is busy, try again in a few moments.');
+});
+
+test('Open Library links: works, editions and ISBN pages go straight to that book', async () => {
+  assert.deepEqual(openLibraryRefFromUrl('https://openlibrary.org/works/OL893415W/Dune?edition=key'), { kind: 'work', id: 'OL893415W' });
+  assert.deepEqual(openLibraryRefFromUrl('openlibrary.org/books/OL26242482M/Dune'), { kind: 'edition', id: 'OL26242482M' });
+  assert.deepEqual(openLibraryRefFromUrl('https://openlibrary.org/isbn/978-0-441-01359-3'), { kind: 'isbn', id: '9780441013593' });
+  assert.equal(openLibraryRefFromUrl('Dune'), null);
+  assert.deepEqual(openLibraryRefFromUrl('https://openlibrary.org/works/OL893415W/Dune?edition=key%3A/books/OL26242482M'), { kind: 'work', id: 'OL893415W', edition: 'OL26242482M' });
+  const calls = mockFetch([
+    ['/books/OL26242482M.json', () => ({ title: 'Dune', works: [{ key: '/works/OL893415W' }], number_of_pages: 658, isbn_13: ['9780441013593'], publishers: ['Ace'], covers: [999] })],
+    ['/works/OL893415W.json', () => ({ title: 'Dune', first_publish_date: 'August 1965', authors: [{ author: { key: '/authors/OL79034A' } }], covers: [123], subjects: ['Science fiction', 'Arrakis'], description: { value: 'Spice.' } })],
+    ['/authors/OL79034A.json', () => ({ name: 'Frank Herbert' })],
+  ]);
+  const [r] = await search('book', 'https://openlibrary.org/books/OL26242482M/Dune', {});
+  assert.equal(r.sourceId, 'OL893415W');
+  assert.equal(r.creator, 'Frank Herbert');
+  assert.equal(r.year, '1965');
+  assert.equal(r.cover, 'https://covers.openlibrary.org/b/id/999-L.jpg', "the edition's own cover");
+  assert.deepEqual(r.details, { pages: 658, isbn: '9780441013593', publisher: 'Ace' });
+  assert.equal(r.url, 'https://openlibrary.org/works/OL893415W');
+  assert.ok(!calls.some((c) => c.url.includes('search.json')), 'no search request');
+  // A work link with an edition picked (Vigil): the work has no cover, the edition does.
+  mockFetch([
+    ['/books/OL61250394M.json', () => ({ title: 'Vigil', covers: [15167710], isbn_13: ['9780525509622'], number_of_pages: 174, publishers: ['Random House'] })],
+    ['/works/OL44876808W.json', () => ({ title: 'Vigil', authors: [{ author: { key: '/authors/OL537475A' } }] })],
+    ['/authors/OL537475A.json', () => ({ name: 'George Saunders' })],
+  ]);
+  const [vigil] = await search('book', 'https://openlibrary.org/works/OL44876808W/Vigil?edition=key%3A/books/OL61250394M', {});
+  assert.equal(vigil.cover, 'https://covers.openlibrary.org/b/id/15167710-L.jpg');
+  assert.deepEqual(vigil.details, { pages: 174, isbn: '9780525509622', publisher: 'Random House' });
+  // A work with no cover of its own takes one from its editions.
+  mockFetch([
+    ['/works/OL5W/editions.json', () => ({ entries: [{ covers: [-1] }, { covers: [4242] }] })],
+    ['/works/OL5W.json', () => ({ title: 'Mycelium', authors: [] })],
+  ]);
+  assert.equal((await search('book', 'https://openlibrary.org/works/OL5W/Mycelium', {}))[0].cover, 'https://covers.openlibrary.org/b/id/4242-L.jpg');
+  // No cover anywhere on Open Library: Google Books' cover of the same book.
+  mockFetch([
+    ['/works/OL6W/editions.json', () => ({ entries: [{}] })],
+    ['/works/OL6W.json', () => ({ title: 'Mycelium', authors: [{ author: { key: '/authors/OL1A' } }] })],
+    ['/authors/OL1A.json', () => ({ name: 'Annette Weisser' })],
+    ['googleapis.com/books', (url) => (url.includes('intitle%3AMycelium') ? { items: [{ id: 'g1', volumeInfo: { title: 'Mycelium', imageLinks: { thumbnail: 'http://books.google.com/x.jpg&edge=curl' } } }] } : { items: [] })],
+  ]);
+  assert.equal((await search('book', 'https://openlibrary.org/works/OL6W', {}))[0].cover, 'https://books.google.com/x.jpg');
+  mockFetch([['openlibrary.org', () => new Response('nope', { status: 404 })]]);
+  await assert.rejects(() => search('book', 'https://openlibrary.org/works/OL1W', {}), /No book found at that Open Library link/);
+  mockFetch([['openlibrary.org', () => new Response('error code: 521', { status: 521 })]]);
+  await assert.rejects(() => search('book', 'https://openlibrary.org/works/OL1W', {}), /Open Library is busy, try again in a few moments/);
+});
+
 // ── GitHub commit flow ──
 
 const astro = (url, env, init) => ({ request: new Request(url, init), url: new URL(url), locals: { runtime: { env } }, params: {} });
@@ -309,6 +366,41 @@ test('saveItem: editing keeps slug, date added and cover; replacing/deleting cle
   await assert.rejects(() => deleteItem(env, first.slug), /not found/);
   await assert.rejects(() => deleteItem(env, '../etc/passwd'), /Invalid slug/);
   await assert.rejects(() => saveItem(env, { slug: 'nope', item: { title: 'X', type: 'book', status: 'want' } }), /not found/);
+});
+
+test('cover copies: stored for the current cover, kept on edits, dropped and cleaned up when the cover changes', async () => {
+  const { saveCoverCopy } = await import('../server/cover-copies.js');
+  const bytes = new TextEncoder().encode('fake-jpeg').buffer;
+  const copy = (env, b) => saveCoverCopy(env, { type: 'image/jpeg', buf: bytes, ...b });
+  const saveSpine = (env, b) => copy(env, { kind: 'spine', ...b });
+  const env = fakeEnv();
+  mockFetch([['example.com', () => new Response(PNG_1x2, { headers: { 'content-type': 'image/png' } })]]);
+  const first = await saveItem(env, { item: { title: 'Dune', type: 'book', year: 1965, status: 'finished', cover: 'https://example.com/a.png' }, body: '' });
+  await assert.rejects(() => saveSpine(env, { slug: first.slug, cover: '/img/other.png' }), /cover changed/);
+  await assert.rejects(() => saveSpine(env, { slug: first.slug, cover: first.item.cover, type: 'image/svg+xml' }), /JPEG or WebP/);
+  const { spine } = await saveSpine(env, { slug: first.slug, cover: first.item.cover });
+  assert.match(spine, /^\/img\/book-dune-1965-spine-[a-z0-9]+\.jpg$/);
+  assert.equal(env.COVERS._store.size, 2);
+  const { shelfCover } = await copy(env, { kind: 'shelf', slug: first.slug, cover: first.item.cover });
+  assert.match(shelfCover, /^\/img\/book-dune-1965-shelf-[a-z0-9]+\.jpg$/);
+  await assert.rejects(() => copy(env, { kind: 'poster', slug: first.slug, cover: first.item.cover }), /kind/);
+  assert.equal(env.COVERS._store.size, 3);
+  // The admin form doesn't send spine back; an edit that keeps the cover keeps the spine.
+  const edit = await saveItem(env, { slug: first.slug, item: { ...first.item, rating: 4 }, body: '' });
+  assert.equal(edit.item.spine, spine);
+  assert.equal(edit.item.shelfCover, shelfCover);
+  // Sending a made-up spine is ignored.
+  const forged = await saveItem(env, { slug: first.slug, item: { ...edit.item, spine: '/img/elsewhere.jpg' }, body: '' });
+  assert.equal(forged.item.spine, spine);
+  await new Promise((r) => setTimeout(r, 2));
+  const swapped = await saveItem(env, { slug: first.slug, item: { ...edit.item, cover: 'https://example.com/b.png' }, body: '' });
+  assert.equal(swapped.item.spine, undefined);
+  assert.equal(swapped.item.shelfCover, undefined);
+  assert.equal(env.COVERS._store.size, 1, 'old cover and its copies removed');
+  await saveSpine(env, { slug: first.slug, cover: swapped.item.cover });
+  await copy(env, { kind: 'shelf', slug: first.slug, cover: swapped.item.cover });
+  await deleteItem(env, first.slug);
+  assert.equal(env.COVERS._store.size, 0, 'deleting the item removes its copies too');
 });
 
 test('missing bindings give a clear error', async () => {
@@ -777,4 +869,114 @@ test('local dates: the browser’s day, not UTC’s', async () => {
   } finally {
     if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev;
   }
+});
+
+test('update check: versions, changelog and announcements from the original project, cached', async () => {
+  const { compareVersions, latestVersion, _resetLatest, parseChangelog, cleanAnnouncements, activeAnnouncements, changesBetween } = await import('../server/latest.js');
+  const { VERSION } = await import('../server/version.js');
+  assert.equal(compareVersions('0.7.10', '0.7.9'), 1);
+  assert.equal(compareVersions('0.8', '0.8.0'), 0);
+  assert.equal(compareVersions('0.6.9', '0.7.0'), -1);
+
+  const log = parseChangelog('# Changelog\n\nintro\n\n## 99.1.0 (Dec 2026)\n\n- **New** thing\n\n## 99.0.0 (Dec 2026)\n\n- Older\n\n## 0.1.0 (Jan 2026)\n\n- Ancient\n');
+  assert.deepEqual(log.map((e) => e.version), ['99.1.0', '99.0.0', '0.1.0']);
+  assert.equal(log[0].body, '- **New** thing');
+  assert.deepEqual(changesBetween(log, '0.5.0', '99.0.0').map((e) => e.version), ['99.0.0']);
+
+  const ann = cleanAnnouncements({ announcements: [
+    { id: 'a', message: 'Hello <b>all</b>', link: 'javascript:alert(1)' },
+    { id: 'old', message: 'Expired', until: '2020-01-01' },
+    { id: 'upd', message: 'Please update', below: '0.0.1' },
+    { message: 'no id' },
+  ] });
+  assert.equal(ann.length, 3);
+  assert.equal(ann[0].link, ''); // https links only
+  assert.deepEqual(activeAnnouncements(ann, '0.5.0', '2026-11-25').map((a) => a.id), ['a']);
+  assert.deepEqual(activeAnnouncements(ann, '0.0.0', '2026-11-25').map((a) => a.id), ['a', 'upd']);
+
+  _resetLatest();
+  const env = fakeEnv();
+  let calls = 0;
+  const files = {
+    'package.json': JSON.stringify({ version: '99.1.0' }),
+    'CHANGELOG.md': '## 99.1.0 (Dec 2026)\n\n- New\n\n## 0.0.1 (old)\n\n- Old\n',
+    'announcements.json': JSON.stringify({ announcements: [{ id: 'hi', message: 'Hi everyone' }] }),
+  };
+  const upstream = async (url) => {
+    calls++;
+    const m = url.match(/^https:\/\/raw\.githubusercontent\.com\/lexjudex\/myshelf\/main\/(.+)$/);
+    return files[m?.[1]] ? new Response(files[m[1]]) : new Response('missing', { status: 404 });
+  };
+  const r = await latestVersion(env, { fetcher: upstream });
+  assert.deepEqual([r.current, r.latest, r.behind], [VERSION, '99.1.0', true]);
+  assert.deepEqual(r.changes.map((e) => e.version), ['99.1.0']);
+  assert.deepEqual(r.announcements.map((a) => a.id), ['hi']);
+  await latestVersion(env, { fetcher: upstream });
+  assert.equal(calls, 3); // three files, then cached
+  _resetLatest(); // a new isolate still has it from D1
+  await latestVersion(env, { fetcher: upstream });
+  assert.equal(calls, 3);
+
+  _resetLatest();
+  const same = async (url) => (url.endsWith('package.json') ? new Response(JSON.stringify({ version: VERSION })) : new Response('', { status: 404 }));
+  const s2 = await latestVersion(fakeEnv(), { fetcher: same });
+  assert.deepEqual([s2.behind, s2.changes, s2.announcements], [false, [], []]);
+  _resetLatest();
+  const down = async () => new Response('nope', { status: 500 });
+  const d = await latestVersion(fakeEnv(), { fetcher: down });
+  assert.deepEqual([d.latest, d.behind], ['', false]);
+});
+
+test('page cache: keeps public pages, serves them, clears on changes', async () => {
+  const { isCacheable, cachedPage, keepPage, clearPages } = await import('../server/page-cache.js');
+  const env = fakeEnv();
+  const get = (p, headers = {}) => [new Request('https://x.dev' + p, { headers }), new URL('https://x.dev' + p)];
+  for (const p of ['/', '/journal/', '/shelf/favorites/', '/type/book/', '/type/book/finished/', '/item/book-dune/']) assert.ok(isCacheable(...get(p)), p);
+  for (const p of ['/admin/', '/api/save', '/img/a.jpg', '/friends/', '/library.json', '/federation/v1/shelf', '/?decor-preview']) assert.ok(!isCacheable(...get(p)), p);
+  assert.ok(!isCacheable(...get('/', { authorization: 'Bearer x' })));
+  const url = new URL('https://x.dev/');
+  assert.equal(await cachedPage(env, url), null);
+  await keepPage(env, url, new Response('<p>404</p>', { status: 404, headers: { 'content-type': 'text/html' } }));
+  assert.equal(await cachedPage(env, url), null, 'errors are not kept');
+  await keepPage(env, url, new Response('<h1>Shelves</h1>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
+  const hit = await cachedPage(env, url);
+  assert.equal(await hit.text(), '<h1>Shelves</h1>');
+  assert.equal(hit.headers.get('x-myshelf-cache'), 'hit');
+  await clearPages(env);
+  assert.equal(await cachedPage(env, url), null);
+  // A page kept by an older build (whose /_astro/ files are gone after a deploy) is never served.
+  await env.DB.prepare('INSERT INTO page_cache (path, html, created_at) VALUES (?1, ?2, ?3)').bind('old-build|/', '<old>', new Date().toISOString()).run();
+  assert.equal(await cachedPage(env, url), null);
+});
+
+test('Source link: a copy left on the original project points at the repository it was built from', async () => {
+  const { sourceOf } = await import('../server/site.js');
+  assert.equal(sourceOf('https://github.com/lexjudex/myshelf', 'dillon/myshelf'), 'https://github.com/dillon/myshelf');
+  assert.equal(sourceOf('', 'dillon/myshelf'), 'https://github.com/dillon/myshelf');
+  assert.equal(sourceOf('https://gitlab.com/me/shelf', 'dillon/myshelf'), 'https://gitlab.com/me/shelf', 'a link you typed stays');
+  assert.equal(sourceOf('https://github.com/lexjudex/myshelf', ''), 'https://github.com/lexjudex/myshelf', 'unknown build repo: unchanged');
+});
+
+test('Settings: progress bars for everyone (default) or only the owner', async () => {
+  const { saveSite, getSite } = await import('../server/site.js');
+  const env = fakeEnv();
+  assert.equal((await getSite(env)).progress, 'public');
+  assert.equal((await saveSite(env, { title: 'X', progress: 'owner' })).progress, 'owner');
+  assert.equal((await saveSite(env, { title: 'X' })).progress, 'owner', 'kept when not sent');
+  assert.equal((await saveSite(env, { title: 'X', progress: 'nonsense' })).progress, 'public');
+});
+
+test('ensureSchema never hands one request a migration another request started (Workers drops those)', async () => {
+  const { ensureSchema } = await import('../server/db.js');
+  const env = fakeEnv();
+  // A first request starts migrating and is abandoned (its promise never settles in this "request").
+  const realBatch = env.DB.batch.bind(env.DB);
+  let hang = true;
+  env.DB.batch = (stmts) => (hang ? new Promise(() => {}) : realBatch(stmts));
+  ensureSchema(env); // never awaited, never finishes
+  await new Promise((r) => setTimeout(r, 5));
+  hang = false;
+  // A later request must not wait on that stuck promise: it runs (and finishes) its own.
+  const done = await Promise.race([ensureSchema(env).then(() => 'ok'), new Promise((r) => setTimeout(() => r('stuck'), 2000))]);
+  assert.equal(done, 'ok');
 });

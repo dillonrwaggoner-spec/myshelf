@@ -6,6 +6,7 @@ import { openArrange, updateItem as updateArrangeItem } from './arrange.js';
 import Sortable from 'sortablejs';
 import { isLegacy, progressTotal, progressOf } from '../lib/types.js';
 import { localDate } from '../lib/dates.js';
+import { drawShareCard, CARD_W, CARD_H } from '../lib/share-card.js';
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const root = $('#admin');
@@ -65,7 +66,7 @@ function coverThumb(item, size = 64) {
   const w = Math.round(size * t.aspect);
   const ph = `<span class="thumb-ph" style="width:${w}px;height:${size}px;background:${t.color}">${esc((item.title || '?').slice(0, 1))}</span>`;
   if (!item.cover) return ph;
-  return `<span class="thumb-wrap"><img class="thumb" src="${esc(item.cover)}" alt="" style="height:${size}px" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(this.nextElementSibling.content.cloneNode(true))"><template>${ph}</template></span>`;
+  return `<span class="thumb-wrap"><img class="thumb" src="${esc(item.shelfCover || item.cover)}" alt="" style="height:${size}px" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(this.nextElementSibling.content.cloneNode(true))"><template>${ph}</template></span>`;
 }
 const SOURCE_NAMES = { openlibrary: 'Open Library', googlebooks: 'Google Books', tmdb: 'TMDB', spotify: 'Spotify', musicbrainz: 'MusicBrainz', igdb: 'IGDB', bgg: 'BoardGameGeek', youtube: 'YouTube', manual: 'Manual' };
 
@@ -102,6 +103,8 @@ function renderConfig(c, types) {
   if (!c.igdb && on('videogame')) missing.push('IGDB');
   if (!c.bgg && on('boardgame')) missing.push('BGG');
   if (!c.spotify && on('music')) missing.push('Spotify (using MusicBrainz)');
+  // Optional, but it keeps book search working when Open Library is down.
+  if (c.googleBooks === false && on('book')) missing.push('Google Books (optional)');
   $('#config-status').innerHTML = missing.length
     ? `<a class="warn" href="#api-keys" data-goto-keys title="Add them in Settings → API keys">Missing keys: ${esc(missing.join(', '))}</a>`
     : '<span class="okay">All sources connected</span>';
@@ -199,8 +202,13 @@ $$('.type-btn').forEach((b) =>
   }),
 );
 
-// "Paste a link" — BoardGameGeek for board games, Spotify for music, YouTube for videos and channels.
+// "Paste a link" — Open Library for books, BoardGameGeek for board games, Spotify for music, YouTube for videos and channels.
 const LINK_FORMS = {
+  book: {
+    placeholder: 'Can\'t find it? Paste an Open Library link…',
+    ok: (url) => /openlibrary\.org\/(works\/OL\d+W|books\/OL\d+M|isbn\/[\dXx-]{10,17})/i.test(url),
+    error: 'That doesn\'t look like an Open Library book link (openlibrary.org/works/… or openlibrary.org/books/…).',
+  },
   boardgame: {
     placeholder: 'Can\'t find it? Paste a BoardGameGeek link…',
     ok: (url) => /boardgamegeek\.com\/(boardgame|boardgameexpansion|thing)\/\d+/i.test(url),
@@ -827,9 +835,148 @@ async function loadLibrary() {
     state.library = [];
   }
   renderLibrary();
+  makeCoverCopies();
+}
+
+// ───────── shelf copies of the covers ─────────
+// The shelves draw small copies of each cover (full-size covers made iPhones crash the page): one for the front
+// (item.shelfCover) and one for the spine (item.spine). Workers can't resize images on the free plan, so this page
+// does it: any stored cover missing a copy gets them, one item at a time in the background.
+// Sizes are the longest side in px: enough for sharp covers on phone screens, a fraction of the originals.
+const COPY_SIZES = {
+  shelf: { boardgame: 900, music: 640, default: 600 },
+  spine: { boardgame: 480, videogame: 360, default: 160 }, // more detail where little blur is applied
+};
+const COPY_FIELDS = { shelf: 'shelfCover', spine: 'spine' };
+let copiesRunning = false;
+async function makeCoverCopies() {
+  if (copiesRunning || !getToken()) return;
+  copiesRunning = true;
+  let made = 0;
+  const failed = new Set();
+  const missing = (i) => Object.entries(COPY_FIELDS).filter(([, f]) => !i[f]).map(([kind]) => kind);
+  try {
+    for (;;) {
+      const item = state.library.find((i) => /^\/img\//.test(i.cover || '') && missing(i).length && !failed.has(i.slug));
+      if (!item) break;
+      try {
+        const img = await loadImage(item.cover);
+        for (const kind of missing(item)) {
+          const image = await shrink(img, item, COPY_SIZES[kind][item.type] || COPY_SIZES[kind].default);
+          const res = await uploadCopy(item, kind, image);
+          item[COPY_FIELDS[kind]] = res[COPY_FIELDS[kind]];
+          made++;
+        }
+        img.src = '';
+      } catch (err) {
+        if (err.message === 'Unauthorized') break;
+        failed.add(item.slug); // a broken image: skip it this time, try again next visit
+        console.warn(`Couldn't make shelf copies of the cover for ${item.title}:`, err);
+      }
+    }
+  } finally {
+    copiesRunning = false;
+  }
+  if (made) console.info(`Made ${made} shelf cop${made === 1 ? 'y' : 'ies'} of covers.`);
+  makeShareCard().catch((err) => console.warn('Could not update the share card:', err));
+}
+
+// ───────── share card: the picture shown when someone shares a link to your site ─────────
+// Drawn here (the Worker can't afford to draw pictures) from your site name, your name, tagline, colours and your
+// latest public covers, then stored on the site. Redrawn only when one of those changes.
+let shareCardRunning = false;
+async function makeShareCard() {
+  if (shareCardRunning || !getToken() || EMBED) return;
+  shareCardRunning = true;
+  try {
+    const [{ site }, { card }] = await Promise.all([api('site'), api('share-card')]);
+    const when = (i) => i.dateFinished || i.dateStarted || i.dateAdded || '';
+    const picks = state.library
+      .filter((i) => i.shelfCover && (i.visibility || 'public') === 'public' && (site.types || []).includes(i.type))
+      .sort((a, b) => when(b).localeCompare(when(a)))
+      .slice(0, 12)
+      .map((i) => i.shelfCover);
+    let host = location.host;
+    try { if (site.url) host = new URL(site.url).host; } catch {}
+    const opts = { title: site.title, owner: site.owner, tagline: site.tagline, accent: site.theme?.accent, mode: site.theme?.mode, host };
+    const sig = await sha256(JSON.stringify({ v: 1, ...opts, picks }));
+    if (card?.sig === sig) return;
+    await document.fonts.load(`800 76px "Plus Jakarta Sans Variable"`).catch(() => {});
+    const covers = (await Promise.all(picks.map((src) => loadImage(src).catch(() => null)))).filter(Boolean);
+    const canvas = document.createElement('canvas');
+    canvas.width = CARD_W;
+    canvas.height = CARD_H;
+    drawShareCard(canvas.getContext('2d'), { ...opts, covers });
+    const blob = await new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not encode the card'))), 'image/jpeg', 0.9));
+    const res = await fetch(`/api/share-card?${new URLSearchParams({ sig })}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${getToken()}`, 'content-type': 'image/jpeg' },
+      body: blob,
+    });
+    if (!res.ok) throw new Error(`Saving the share card failed (${res.status})`);
+  } finally {
+    shareCardRunning = false;
+  }
+}
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function loadImage(src) {
+  const img = new Image();
+  img.src = src; // same site, so the canvas stays readable
+  await img.decode();
+  return img;
+}
+function shrink(img, item, long) {
+  const scale = Math.min(1, long / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = (TYPES[item.type] || TYPES.book).color || '#333'; // behind transparent PNGs
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not encode the image'))), 'image/jpeg', 0.85));
+}
+// Sent as raw bytes: decoding base64 on the Worker costs more CPU than the free plan allows a request.
+async function uploadCopy(item, kind, blob) {
+  const q = new URLSearchParams({ slug: item.slug, kind, cover: item.cover });
+  const res = await fetch(`/api/cover-copy?${q}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${getToken()}`, 'content-type': 'image/jpeg' },
+    body: blob,
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (res.status === 401) { showLogin('Your token was rejected.'); throw new Error('Unauthorized'); }
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
 }
 function libraryItems() {
   return state.library;
+}
+const LIB_PAGE = 25;
+let libPage = 1;
+// Page buttons: ‹ Prev, 1 … 4 5 6 … 12, Next ›, and "26–50 of 280".
+function renderPager(pages, total) {
+  const nav = $('#lib-pager');
+  nav.hidden = pages <= 1;
+  if (pages <= 1) { nav.innerHTML = ''; return; }
+  const nums = [...new Set([1, libPage - 1, libPage, libPage + 1, pages])].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+  const parts = [];
+  nums.forEach((n, i) => {
+    if (i && n - nums[i - 1] > 1) parts.push('<span class="pager-gap" aria-hidden="true">…</span>');
+    parts.push(`<button type="button" class="btn ghost small${n === libPage ? ' on' : ''}" data-page="${n}" ${n === libPage ? 'aria-current="page"' : ''}>${n}</button>`);
+  });
+  const from = (libPage - 1) * LIB_PAGE + 1, to = Math.min(total, libPage * LIB_PAGE);
+  nav.innerHTML = `
+    <button type="button" class="btn ghost small" data-page="${libPage - 1}" ${libPage === 1 ? 'disabled' : ''} aria-label="Previous page">‹ Prev</button>
+    <span class="pager-nums">${parts.join('')}</span>
+    <button type="button" class="btn ghost small" data-page="${libPage + 1}" ${libPage === pages ? 'disabled' : ''} aria-label="Next page">Next ›</button>
+    <span class="pager-count muted small">${from}–${to} of ${total}</span>`;
 }
 function renderLibrary() {
   const q = $('#lib-filter').value.trim().toLowerCase();
@@ -839,8 +986,13 @@ function renderLibrary() {
   const list = libraryItems().filter(
     (i) => (!type || i.type === type) && (!q || `${i.title} ${i.creator}`.toLowerCase().includes(q)),
   ).map((i, n) => [i, n]).sort(([a, x], [b, y]) => added(b).localeCompare(added(a)) || y - x).map(([i]) => i);
-  $('#lib-list').innerHTML = list.length
-    ? list
+  // A page at a time: 25 items, newest first, with page buttons underneath.
+  const pages = Math.max(1, Math.ceil(list.length / LIB_PAGE));
+  libPage = Math.min(Math.max(1, libPage), pages);
+  const shown = list.slice((libPage - 1) * LIB_PAGE, libPage * LIB_PAGE);
+  renderPager(pages, list.length);
+  $('#lib-list').innerHTML = shown.length
+    ? shown
         .map((i) => `
       <li class="lib-row">
         ${coverThumb(i, 56)}
@@ -858,8 +1010,15 @@ function renderLibrary() {
         .join('')
     : '<li class="muted">Nothing matches.</li>';
 }
-$('#lib-filter').addEventListener('input', renderLibrary);
-$('#lib-type').addEventListener('change', renderLibrary);
+$('#lib-filter').addEventListener('input', () => { libPage = 1; renderLibrary(); });
+$('#lib-type').addEventListener('change', () => { libPage = 1; renderLibrary(); });
+$('#lib-pager').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-page]');
+  if (!b || b.disabled) return;
+  libPage = Number(b.dataset.page);
+  renderLibrary();
+  $('#lib-filter').closest('.panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
 async function editSlug(slug, afterSave = null) {
   try {
@@ -912,34 +1071,40 @@ function renderCollections() {
   $('#col-list').innerHTML = state.collections
     .map((c, i) => `
     <li class="col-row" data-i="${i}">
-      <span class="col-move">
-        <span class="col-handle" title="Drag to reorder" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></span>
-        <button class="btn ghost small col-arrow" data-up ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
-        <button class="btn ghost small col-arrow" data-down ${i === state.collections.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
-      </span>
-      <input class="col-name" value="${esc(c.name)}" placeholder="Collection name" />
-      <input class="col-desc" value="${esc(c.description)}" placeholder="Description (optional)" />
-      <label class="col-show" title="Where this collection appears">
-        <span class="muted small">Show on</span>
-        <select class="col-show-select" aria-label="Show on">
-          ${Object.entries(SHOW_OPTIONS).map(([k, label]) => `<option value="${k}" ${(c.show || 'shelves') === k ? 'selected' : ''}>${esc(label)}</option>`).join('')}
-        </select>
-      </label>
-      <span class="col-sort">
-        <span class="muted small">Sort</span>
-        <select class="col-sort-select" aria-label="Sort order">
-          ${Object.entries(SORTS).map(([k, label]) => `<option value="${k}" ${(c.sort || 'newest') === k ? 'selected' : ''}>${esc(label)}</option>`).join('')}
-        </select>
-        ${(c.sort || 'newest') === 'custom' ? `<button class="btn ghost small" data-arrange ${c.slug ? '' : 'disabled title="Save the collection first"'}>Arrange</button>` : ''}
-      </span>
-      <label class="col-within" title="${c.auto === 'finished' ? 'Only keep items finished within this time' : c.auto === 'in-progress' ? 'Only keep items started within this time' : 'Only keep items from within this time'}">
-        <span class="muted small">Keep</span>
-        <select class="col-within-select" aria-label="Time window">
-          ${Object.entries(WITHIN_OPTIONS).map(([k, label]) => `<option value="${k}" ${String(c.within || '') === k ? 'selected' : ''}>${esc(label)}</option>`).join('')}
-        </select>
-      </label>
-      <span class="muted small col-slug">${isAutoShelf(c) ? `auto: ${[c.auto && esc(AUTO_RULES[c.auto] || c.auto), c.minRating && `${c.minRating}★+`].filter(Boolean).join(', ')}` : c.slug ? '/shelf/' + esc(c.slug) : 'new'}</span>
-      <button class="btn ghost small danger" data-remove aria-label="Remove">✕</button>
+      <div class="col-top">
+        <span class="col-move">
+          <span class="col-handle" title="Drag to reorder" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></span>
+          <button class="btn ghost small col-arrow" data-up ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
+          <button class="btn ghost small col-arrow" data-down ${i === state.collections.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
+        </span>
+        <input class="col-name" value="${esc(c.name)}" placeholder="Collection name" aria-label="Collection name" />
+        <span class="col-kind col-slug" title="${isAutoShelf(c) ? 'Fills itself' : 'Your own picks'}">${isAutoShelf(c) ? `Auto · ${[c.auto && esc(AUTO_RULES[c.auto] || c.auto), c.minRating && `${c.minRating}★+`].filter(Boolean).join(', ')}` : c.slug ? '/shelf/' + esc(c.slug) : 'New'}</span>
+        <button class="btn ghost small danger" data-remove aria-label="Remove ${esc(c.name || 'collection')}" title="Remove">✕</button>
+      </div>
+      <input class="col-desc" value="${esc(c.description)}" placeholder="Description (optional)" aria-label="Description" />
+      <div class="col-settings">
+        <label class="col-field col-show" title="Where this collection appears">
+          <span>Show on</span>
+          <select class="col-show-select">
+            ${Object.entries(SHOW_OPTIONS).map(([k, label]) => `<option value="${k}" ${(c.show || 'shelves') === k ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+          </select>
+        </label>
+        <div class="col-field col-sort">
+          <span id="col-sort-${i}">Sort</span>
+          <div class="col-sort-line">
+            <select class="col-sort-select" aria-labelledby="col-sort-${i}">
+              ${Object.entries(SORTS).map(([k, label]) => `<option value="${k}" ${(c.sort || 'newest') === k ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+            </select>
+            ${(c.sort || 'newest') === 'custom' ? `<button class="btn ghost small" data-arrange ${c.slug ? '' : 'disabled title="Save the collection first"'}>Arrange</button>` : ''}
+          </div>
+        </div>
+        <label class="col-field col-within" title="${c.auto === 'finished' ? 'Only keep items finished within this time' : c.auto === 'in-progress' ? 'Only keep items started within this time' : 'Only keep items from within this time'}">
+          <span>Keep</span>
+          <select class="col-within-select">
+            ${Object.entries(WITHIN_OPTIONS).map(([k, label]) => `<option value="${k}" ${String(c.within || '') === k ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+          </select>
+        </label>
+      </div>
     </li>`)
     .join('') || '<li class="muted">No collections yet.</li>';
 }
@@ -1221,6 +1386,10 @@ $('#export-btn').addEventListener('click', async () => {
 // /admin/#add=collection-slug[&type=boardgame] — from "＋ Add more" in a collection's arrange dialog.
 // /admin/#search=<type>&q=<title> — "Add it" on a recommendation in the inbox on the public Friends page.
 function handleHash() {
+  if (location.hash === '#updates') { // the "Update available" pill in the top bar
+    showTab('settings');
+    return requestAnimationFrame(() => $('#updates-heading')?.scrollIntoView({ block: 'start' }));
+  }
   if (location.hash === '#api-keys') {
     showTab('settings');
     return requestAnimationFrame(() => $('#api-keys')?.scrollIntoView({ block: 'start' }));

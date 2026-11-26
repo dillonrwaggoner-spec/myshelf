@@ -39,6 +39,8 @@ const typesJson = JSON.stringify(TYPES);
       </div>
 
       <div id="storage-banner" class="storage-banner" hidden></div>
+      <!-- A newer MyShelf is out, and announcements from the project (src/scripts/update-banner.js) -->
+      <div id="update-banner" class="update-banner" role="region" aria-label="MyShelf updates" hidden></div>
 
       <!-- First sign-in on a new site (no collections yet): offer the starter shelves. -->
       <div id="starter-welcome" class="panel starter-welcome" hidden>
@@ -90,6 +92,7 @@ const typesJson = JSON.stringify(TYPES);
             <span id="refresh-bgg-msg" class="muted small"></span>
           </div>
           <ul id="lib-list" class="lib-list"></ul>
+          <nav id="lib-pager" class="pager" aria-label="Library pages" hidden></nav>
         </div>
       </div>
 
@@ -152,11 +155,17 @@ const typesJson = JSON.stringify(TYPES);
       <!-- Settings -->
       <div class="tabpanel" data-panel="settings" hidden>
         <div class="panel">
+          <!-- Updates first: which version this is, and whether a newer one is out. -->
+          <h2 id="updates-heading">Updates</h2>
+          <p id="version" class="version"></p>
+          <div id="updates" class="updates"><p class="muted">Checking for a new version…</p></div>
+          <div id="your-version-notes" class="your-version-notes"></div>
           <h2>Your site</h2>
           <form id="site-form" class="site-form">
             <label>Site name <input name="title" maxlength="80" required /></label>
-            <label>Your name <input name="owner" maxlength="80" placeholder="Shown next to the site name and to friends" /></label>
-            <label class="span2">Tagline <input name="tagline" maxlength="200" /></label>
+            <label>Your name <input name="owner" maxlength="80" placeholder="Shown next to the site name (top left) and to friends" /></label>
+            <label>Shelves page heading <input name="heading" maxlength="80" placeholder="Featured Shelves" /></label>
+            <label>Tagline <input name="tagline" maxlength="200" placeholder="Shown under the heading" /></label>
             <label class="span2">Public address <span class="muted small">(optional — set this if you use a custom domain, so friends always reach the same address)</span>
               <input name="url" placeholder="https://myshelf.example.com" />
             </label>
@@ -168,6 +177,14 @@ const typesJson = JSON.stringify(TYPES);
               <p class="muted small">Uncheck anything you don’t track. It disappears from the menu, its pages and your shelves. Nothing is deleted: check it again and it all comes back.</p>
               <div class="checks">
                 {TYPE_KEYS.map((t) => <label class="check"><input type="checkbox" name="types" value={t} checked /> <span>{TYPES[t].plural}</span></label>)}
+              </div>
+            </fieldset>
+            <fieldset class="span2 progress-vis">
+              <legend>Progress bars</legend>
+              <p class="muted small">The bars on books, TV shows and legacy games that show how far along you are.</p>
+              <div class="look-modes" role="radiogroup" aria-label="Who sees progress bars">
+                <label class="look-mode"><input type="radio" name="progress" value="public" checked /> Everyone</label>
+                <label class="look-mode"><input type="radio" name="progress" value="owner" /> Only me <span class="muted small">(when signed in)</span></label>
               </div>
             </fieldset>
             <fieldset class="span2 look">
@@ -191,13 +208,17 @@ const typesJson = JSON.stringify(TYPES);
             <div class="row span2"><button class="btn primary" type="submit">Save</button><span id="site-msg" class="muted small"></span></div>
           </form>
           <h2 id="api-keys">API keys</h2>
-          <p class="muted">Paste the free keys for the databases MyShelf looks things up in. They’re stored encrypted on your own Cloudflare account, never shown again here (only their last four characters), and never shared with friends or put in backups. A key saved here is used instead of a Worker secret with the same name. Not sure where to get one? See <a href="https://github.com/lexjudex/myshelf#free-api-keys" target="_blank" rel="noopener">Free API keys</a>.</p>
+          <p class="muted">Paste the free keys for the databases MyShelf looks things up in. They’re stored encrypted on your own Cloudflare account, never shown again here (only their last four characters), and never shared with friends or put in backups. A key saved here is used instead of a Worker secret with the same name. Not sure where to get one? See <a href="https://github.com/lexjudex/myshelf#step-6-add-api-keys-for-the-media-you-track" target="_blank" rel="noopener">step-by-step instructions with links</a>.</p>
           <p id="keys-error" class="error" hidden></p>
           <div id="keys-list" class="keys-list"><p class="muted">Loading…</p></div>
           <h2>Shelf decorations</h2>
-          <p class="muted">Add up to three images that stand on top of the bookcase on your main Shelves page, like a teddy bear, a mini figure, or a photo in a frame. Use PNGs with a transparent background, or put any image (a JPG, or anything with a background) in a frame. Up to 2 MB each. <strong>Drag them in the preview</strong> to place them, left, right, up or down (arrow keys nudge), or set exact numbers below. The preview shows exactly what your Shelves page will. Switch to <strong>Phone</strong> to give phones their own layout. Changes save as you make them.</p>
+          <p class="muted">Add up to three images that stand on top of the bookcase on your main Shelves page, like a teddy bear, a mini figure, or a photo in a frame. Use PNGs with a transparent background, or put any image (a JPG, or anything with a background) in a frame. Up to 2 MB each. <strong>Unlock the preview, then drag them</strong> to place them, left, right, up or down (arrow keys nudge), or set exact numbers below. Lock it again so nothing moves by accident, and <strong>Undo</strong> steps back through your changes. The preview shows exactly what your Shelves page will. Switch to <strong>Phone</strong> to give phones their own layout. Where they overlap, the <strong>top of the list stands in front</strong>: drag the <span aria-hidden="true">⠿</span> handle (or use ↑ ↓) to change it. Changes save as you make them.</p>
           <div class="decor-preview-bar">
             <span class="muted small" id="decor-editing"></span>
+            <span class="decor-tools">
+              <button type="button" class="btn ghost small" id="decor-lock" aria-pressed="true" title="While locked, dragging in the preview does nothing">🔒 Locked</button>
+              <button type="button" class="btn ghost small" id="decor-undo" disabled title="Undo the last change (Ctrl/⌘+Z)">↶ Undo</button>
+            </span>
             <span class="decor-modes" role="group" aria-label="Preview size">
               <button type="button" class="btn ghost small on" data-decor-mode="desktop" aria-pressed="true">Desktop</button>
               <button type="button" class="btn ghost small" data-decor-mode="phone" aria-pressed="false">Phone</button>
@@ -213,9 +234,6 @@ const typesJson = JSON.stringify(TYPES);
             <label class="btn ghost file-btn" id="decor-add">＋ Add a decoration… <input id="decor-file" type="file" accept="image/png,image/webp,image/jpeg" hidden /></label>
             <span id="decor-msg" class="muted small"></span>
           </div>
-          <h2>Updates</h2>
-          <p id="version" class="version"></p>
-          <div id="updates" class="updates"><p class="muted">Checking for a new version…</p></div>
           <h2>Backup &amp; restore</h2>
           <p class="muted">A backup is one JSON file with all your entries, notes, collections, shelf orders and site settings. Restoring adds those to this site, replacing entries with the same name. Moving to a new site? Restore here while the old site is still online and the covers are copied over from it.</p>
           <div class="row">
@@ -358,6 +376,7 @@ const typesJson = JSON.stringify(TYPES);
     import '../../scripts/friends.js';
     import '../../scripts/decor-settings.js';
     import '../../scripts/api-keys.js';
+    import '../../scripts/update-banner.js';
     import { enableMentionPicker } from '../../scripts/mention-picker.js';
     enableMentionPicker();
   </script>
